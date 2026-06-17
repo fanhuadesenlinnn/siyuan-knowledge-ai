@@ -1,0 +1,41 @@
+{
+  "name": "siyuan-knowledge-ai",
+  "author": "fanhuadesenlinnn",
+  "url": "https://github.com/fanhuadesenlinnn/siyuan-knowledge-ai",
+  "version": "0.1.0",
+  "minAppVersion": "3.6.0",
+  "displayName": {
+    "default": "Knowledge AI",
+    "zh_CN": "Knowledge AI"
+  },
+  "description": {
+    "default": "Local-first SiYuan knowledge assistant with S3-synced index shards and OpenAI-compatible APIs.",
+    "zh_CN": "无后端的思源知识助手，索引分片随思源同步，支持 ChatGPT 和通用 OpenAI-compatible API。"
+  },
+  "readme": {
+    "default": "README.md",
+    "zh_CN": "README.md"
+  },
+  "funding": {
+    "openCollective": "",
+    "patreon": "",
+    "github": "",
+    "custom": []
+  },
+  "keywords": [
+    "ai",
+    "rag",
+    "openai",
+    "s3",
+    "knowledge"
+  ],
+  "backends": [
+    "windows",
+    "linux",
+    "darwin"
+  ],
+  "frontends": [
+    "desktop",
+    "browser-desktop"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "siyuan-knowledge-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first SiYuan AI assistant with S3-synced index shards.",
+  "scripts": {
+    "check": "node --check index.js && node --check lib/core.js",
+    "test": "node test/core.test.js",
+    "pack": "rm -f package.zip && zip -r package.zip plugin.json index.js index.css README.md lib"
+  },
+  "keywords": [
+    "siyuan",
+    "plugin",
+    "ai",
+    "rag",
+    "openai"
+  ],
+  "license": "MIT"
+}
