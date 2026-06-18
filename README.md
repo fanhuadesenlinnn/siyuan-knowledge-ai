@@ -13,10 +13,12 @@ data/storage/petal/siyuan-knowledge-ai/index/
 - 全库笔记手动建立本地向量索引
 - 索引 manifest 与分片随思源数据同步
 - 支持 OpenAI 官方和 OpenAI-compatible API
+- 支持 Google Gemini OpenAI-compatible API
 - 支持可留空 API Key 的本地兼容服务，例如 Ollama OpenAI-compatible endpoint
 - 基于全库笔记片段问答并显示引用来源
-- 顶栏入口打开独立 Knowledge AI 工作台页签
+- 右侧 Dock 面板进行多轮问答
 - 思源插件设置页管理模型、索引和写入选项
+- 设置页可直接测试聊天模型和 Embedding 模型
 - 将回答保存为新文档或追加到当前文档
 - 根据指令生成新笔记草稿，确认后创建文档
 - 根据指令改写指定块，确认后覆盖目标块
@@ -33,8 +35,8 @@ data/plugins/siyuan-knowledge-ai/
 3. 打开 `设置 -> 集市 -> 已下载 -> 插件`。
 4. 启用 `Knowledge AI`。
 5. 在插件列表中点击 `设置`，填写 Base URL、模型和 API Key。
-6. 点击思源顶部栏的 `Knowledge AI` 图标，打开工作台。
-7. 在工作台点击 `更新全库索引`。
+6. 点击右侧 Dock 的 `Knowledge AI` 图标，打开问答面板。
+7. 在插件设置的 `索引` 页点击 `更新索引`。
 8. 等待索引写入完成后开始提问。
 
 ## 多设备同步
@@ -52,12 +54,23 @@ data/plugins/siyuan-knowledge-ai/
 - Chat model: `gpt-4.1-mini`
 - Embedding model: `text-embedding-3-small`
 
-也可以填写任何兼容 OpenAI API 的服务。服务需要提供：
+设置页内置 OpenAI、Google Gemini、Ollama 三个预设，也可以填写任何兼容 OpenAI API 的服务。服务需要提供：
 
 - `POST /chat/completions`
 - `POST /embeddings`
 
-插件通过思源 `/api/network/forwardProxy` 调用模型接口，避免浏览器前端直接请求第三方 API 时的 CORS 问题。
+远程服务通过思源 `/api/network/forwardProxy` 调用，避免浏览器前端直接请求第三方 API 时的 CORS 问题。本地 Ollama 等回环地址会由插件直接请求，并把 `localhost`、`::1` 规范为 `127.0.0.1`，避免思源 v3.6.5 的代理安全策略拦截本机地址。
+
+Gemini 预设：
+
+- Base URL: `https://generativelanguage.googleapis.com/v1beta/openai`
+- Chat model: `gemini-3.5-flash`
+- Embedding model: `gemini-embedding-001`
+
+Ollama 预设：
+
+- Base URL: `http://127.0.0.1:11434/v1`
+- API Key: 可留空
 
 ## 安全写入
 

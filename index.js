@@ -7,16 +7,19 @@ const {
   blockToChunks,
   buildMessages,
   buildModelProxyPayload,
+  buildModelRequestHeaders,
   clampNumber,
   detectProvider,
   escapeHtml,
   escapeSql,
   extractChatContent,
   extractEmbeddings,
+  isLocalModelBaseUrl,
   makeManifestPath,
   makeShardPath,
   mergeConfig,
   normalizeBaseUrl,
+  normalizeModelBaseUrlForRequest,
   nowIso,
   parseModelProxyJson,
   rankChunks,
@@ -164,6 +167,17 @@ class SiyuanKnowledgeAI extends Plugin {
             ${this.renderSettingField("temperature", "温度", "回答和草稿生成的随机性。", { number: true, step: "0.1", min: "0", max: "2" })}
             ${this.renderSettingField("modelTimeoutMs", "模型超时毫秒", "通过思源代理调用模型接口的超时时间。", { number: true, min: "1000" })}
             ${this.renderSettingField("systemPrompt", "系统提示词", "问答时使用的系统提示词。", { textarea: true })}
+            <div class="kai-setting-row">
+              <span class="kai-setting-copy">
+                <span class="kai-setting-title">连接测试</span>
+                <span class="kai-setting-desc">使用当前表单内容测试模型，不需要先保存。</span>
+              </span>
+              <div class="kai-actions kai-actions-model">
+                <button class="b3-button b3-button--outline" data-kai-settings-action="test-chat">测试聊天</button>
+                <button class="b3-button b3-button--outline" data-kai-settings-action="test-embedding">测试向量</button>
+              </div>
+            </div>
+            <div class="kai-status" data-kai-model-status>尚未测试。</div>
           </section>
 
           <section class="kai-settings-page" data-kai-page="retrieval">
@@ -284,14 +298,13 @@ class SiyuanKnowledgeAI extends Plugin {
         event.preventDefault();
         event.stopPropagation();
         const action = settingsAction.getAttribute("data-kai-settings-action");
-        try {
+        await this.runSettingsAction(settingsAction, async () => {
           if (action === "build-index") await this.buildIndex(root);
           else if (action === "refresh-index") await this.refreshIndexStatus(root);
           else if (action === "clear-index") await this.clearIndex(root);
-        } catch (error) {
-          console.error("Knowledge AI settings action failed", error);
-          showMessage(`Knowledge AI：${error.message || error}`, 7000, "error");
-        }
+          else if (action === "test-chat") await this.testChatConnection(root);
+          else if (action === "test-embedding") await this.testEmbeddingConnection(root);
+        });
         return;
       }
       if (!cancel && !save) return;
@@ -328,11 +341,20 @@ class SiyuanKnowledgeAI extends Plugin {
   }
 
   async saveSettingsFromDialog(root) {
+    const draft = this.readSettingsDraft(root);
+    this.setApiKey(draft.apiKey);
+    await this.saveConfig(draft.config);
+    this.refreshAllDockHeads();
+    showMessage("Knowledge AI：设置已保存");
+  }
+
+  readSettingsDraft(root) {
     const next = Object.assign({}, this.config);
+    let apiKey = this.getApiKey();
     for (const element of root.querySelectorAll("[data-kai-setting-key]")) {
       const key = element.getAttribute("data-kai-setting-key");
       if (element.dataset.kaiLocal === "true") {
-        this.setApiKey(element.value);
+        apiKey = element.value;
       } else if (element.type === "checkbox") {
         next[key] = element.checked;
       } else if (element.type === "number") {
@@ -341,9 +363,10 @@ class SiyuanKnowledgeAI extends Plugin {
         next[key] = element.value;
       }
     }
-    await this.saveConfig(next);
-    this.refreshAllDockHeads();
-    showMessage("Knowledge AI：设置已保存");
+    return {
+      config: this.normalizeConfig(next),
+      apiKey,
+    };
   }
 
   async loadConfig() {
@@ -357,6 +380,13 @@ class SiyuanKnowledgeAI extends Plugin {
   }
 
   async saveConfig(nextConfig) {
+    const merged = this.normalizeConfig(nextConfig);
+    this.config = merged;
+    await this.saveData(CONFIG_FILE, merged);
+    this.startIndexSchedule();
+  }
+
+  normalizeConfig(nextConfig) {
     const merged = mergeConfig(nextConfig);
     merged.temperature = clampNumber(merged.temperature, 0, 2, DEFAULT_CONFIG.temperature);
     merged.topK = clampNumber(merged.topK, 1, 30, DEFAULT_CONFIG.topK);
@@ -377,12 +407,10 @@ class SiyuanKnowledgeAI extends Plugin {
       24 * 30,
       DEFAULT_CONFIG.autoIndexEveryHours,
     );
-    merged.baseUrl = normalizeBaseUrl(merged.baseUrl);
+    merged.baseUrl = normalizeModelBaseUrlForRequest(merged.baseUrl);
     merged.allowWriteActions = Boolean(merged.allowWriteActions);
     merged.autoIndexOnStart = Boolean(merged.autoIndexOnStart);
-    this.config = merged;
-    await this.saveData(CONFIG_FILE, merged);
-    this.startIndexSchedule();
+    return merged;
   }
 
   getApiKey() {
@@ -702,6 +730,53 @@ class SiyuanKnowledgeAI extends Plugin {
     progress.value = Math.max(0, Number(value || 0));
   }
 
+  setModelStatus(root, text, isError) {
+    const status = root && root.querySelector("[data-kai-model-status]");
+    if (!status) return;
+    status.textContent = text;
+    status.classList.toggle("kai-status-error", Boolean(isError));
+  }
+
+  async runSettingsAction(button, callback) {
+    const previousDisabled = button.disabled;
+    button.disabled = true;
+    try {
+      await callback();
+    } catch (error) {
+      console.error("Knowledge AI settings action failed", error);
+      showMessage(`Knowledge AI：${error.message || error}`, 7000, "error");
+      const root = button.closest(".kai-settings-dialog");
+      if (root) this.setModelStatus(root, error.message || String(error), true);
+    } finally {
+      button.disabled = previousDisabled;
+    }
+  }
+
+  async testChatConnection(root) {
+    const draft = this.readSettingsDraft(root);
+    this.setModelStatus(root, "正在测试聊天模型...");
+    const answer = await this.chat(
+      [
+        {
+          role: "user",
+          content: "只回复 OK，不要解释。",
+        },
+      ],
+      draft,
+    );
+    this.setModelStatus(root, `聊天测试通过：${answer.slice(0, 120)}`);
+    showMessage("Knowledge AI：聊天测试通过");
+  }
+
+  async testEmbeddingConnection(root) {
+    const draft = this.readSettingsDraft(root);
+    this.setModelStatus(root, "正在测试 Embedding 模型...");
+    const embeddings = await this.embedTexts(["Knowledge AI embedding connection test"], draft);
+    const dimension = embeddings[0] && embeddings[0].length ? embeddings[0].length : 0;
+    this.setModelStatus(root, `向量测试通过：维度 ${dimension}`);
+    showMessage("Knowledge AI：向量测试通过");
+  }
+
   async refreshIndexStatus(root) {
     const manifest = await this.readManifest();
     if (!manifest) {
@@ -932,36 +1007,72 @@ class SiyuanKnowledgeAI extends Plugin {
     return chunks;
   }
 
-  async modelPost(endpoint, payload, label) {
-    const url = `${normalizeBaseUrl(this.config.baseUrl)}/${String(endpoint || "").replace(/^\/+/, "")}`;
-    const proxyPayload = buildModelProxyPayload(url, this.getApiKey(), payload, this.config.modelTimeoutMs);
+  async modelPost(endpoint, payload, label, options) {
+    const runtime = options || {};
+    const config = runtime.config || this.config;
+    const apiKey = runtime.apiKey == null ? this.getApiKey() : runtime.apiKey;
+    const baseUrl = normalizeModelBaseUrlForRequest(config.baseUrl);
+    const url = `${baseUrl}/${String(endpoint || "").replace(/^\/+/, "")}`;
+    if (isLocalModelBaseUrl(baseUrl)) {
+      return this.directModelPost(url, apiKey, payload, label, config.modelTimeoutMs);
+    }
+    const proxyPayload = buildModelProxyPayload(url, apiKey, payload, config.modelTimeoutMs);
     const data = await this.siyuanPost("/api/network/forwardProxy", proxyPayload);
     return parseModelProxyJson(data, label);
   }
 
-  async embedTexts(texts) {
+  async directModelPost(url, apiKey, payload, label, timeout) {
+    let response;
+    let body = "";
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timeoutId = controller
+      ? window.setTimeout(() => controller.abort(), clampNumber(timeout, 1000, 10 * 60 * 1000, DEFAULT_CONFIG.modelTimeoutMs))
+      : null;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: buildModelRequestHeaders(apiKey),
+        body: JSON.stringify(payload || {}),
+        signal: controller ? controller.signal : undefined,
+      });
+      body = await response.text();
+    } catch (error) {
+      throw new Error(
+        `${label} API 本地直连失败：${error.message || error}。请确认本地模型服务已启动，且 Base URL 使用 http://127.0.0.1:端口/v1。`,
+      );
+    } finally {
+      if (timeoutId) window.clearTimeout(timeoutId);
+    }
+    return parseModelProxyJson({ status: response.status, body, url }, label);
+  }
+
+  async embedTexts(texts, options) {
+    const config = options && options.config ? options.config : this.config;
     const data = await this.modelPost(
       "embeddings",
       {
-        model: this.config.embeddingModel,
+        model: config.embeddingModel,
         input: texts,
       },
       "Embedding",
+      options,
     );
     const embeddings = extractEmbeddings(data);
     if (embeddings.length !== texts.length) throw new Error("Embedding API 返回数量和请求数量不一致");
     return embeddings;
   }
 
-  async chat(messages) {
+  async chat(messages, options) {
+    const config = options && options.config ? options.config : this.config;
     const data = await this.modelPost(
       "chat/completions",
       {
-        model: this.config.chatModel,
+        model: config.chatModel,
         messages,
-        temperature: this.config.temperature,
+        temperature: config.temperature,
       },
       "Chat",
+      options,
     );
     return extractChatContent(data);
   }

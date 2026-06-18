@@ -10,7 +10,9 @@ const {
   detectProvider,
   extractChatContent,
   extractEmbeddings,
+  isLocalModelBaseUrl,
   mergeConfig,
+  normalizeModelBaseUrlForRequest,
   parseModelProxyJson,
   PROVIDER_PRESETS,
   rankChunks,
@@ -117,6 +119,7 @@ assert.strictEqual(detectProvider("https://api.openai.com/v1"), "openai");
 assert.strictEqual(detectProvider("https://api.openai.com/v1/"), "openai");
 assert.strictEqual(detectProvider("https://generativelanguage.googleapis.com/v1beta/openai"), "gemini");
 assert.strictEqual(detectProvider("http://localhost:11434/v1"), "ollama");
+assert.strictEqual(detectProvider("http://127.0.0.1:11434/v1"), "ollama");
 // 容错：改过路径但 host 相同
 assert.strictEqual(detectProvider("https://api.openai.com/v1/custom"), "openai");
 assert.strictEqual(detectProvider("https://generativelanguage.googleapis.com/v1beta/openai/extra"), "gemini");
@@ -124,6 +127,13 @@ assert.strictEqual(detectProvider("https://generativelanguage.googleapis.com/v1b
 assert.strictEqual(detectProvider("https://my-proxy.example.com/v1"), "custom");
 assert.strictEqual(detectProvider(""), "custom");
 assert.strictEqual(detectProvider(null), "custom");
+
+// 本地模型地址：避免 localhost 在思源 forwardProxy 中解析成被禁止的 ::1
+assert.strictEqual(isLocalModelBaseUrl("http://localhost:11434/v1"), true);
+assert.strictEqual(isLocalModelBaseUrl("http://127.0.0.1:11434/v1"), true);
+assert.strictEqual(isLocalModelBaseUrl("https://api.openai.com/v1"), false);
+assert.strictEqual(normalizeModelBaseUrlForRequest("http://localhost:11434/v1"), "http://127.0.0.1:11434/v1");
+assert.strictEqual(normalizeModelBaseUrlForRequest("http://[::1]:11434/v1/"), "http://127.0.0.1:11434/v1");
 
 // PROVIDER_PRESETS 结构校验
 assert.ok(Array.isArray(PROVIDER_PRESETS));
@@ -135,5 +145,8 @@ for (const p of PROVIDER_PRESETS) {
   assert.ok(p.chatModel && typeof p.chatModel === "string");
   assert.ok(p.embeddingModel && typeof p.embeddingModel === "string");
 }
+const geminiPreset = PROVIDER_PRESETS.find((p) => p.id === "gemini");
+assert.ok(geminiPreset);
+assert.notStrictEqual(geminiPreset.embeddingModel, "text-embedding-004");
 
 console.log("core tests passed");

@@ -369,6 +369,11 @@
   word-break: break-word;
 }
 
+.kai-status-error {
+  color: var(--b3-theme-error);
+  border-color: var(--b3-theme-error);
+}
+
 .kai-progress {
   width: 100%;
   height: 8px;
@@ -383,6 +388,10 @@
 
 .kai-actions-index {
   margin: 4px 0;
+}
+
+.kai-actions-model {
+  justify-content: flex-start;
 }
 
 .kai-log {
