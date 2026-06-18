@@ -38,6 +38,11 @@
   align-content: start;
 }
 
+.kai-chat-pane {
+  min-height: calc(100vh - 72px);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+}
+
 .kai-brand {
   display: flex;
   align-items: center;
@@ -142,8 +147,13 @@
   width: 100%;
 }
 
+.kai-answer-actions {
+  padding-top: 4px;
+}
+
 .kai-sidebar label,
-.kai-pane label {
+.kai-pane label,
+.kai-compose-dialog label {
   display: grid;
   gap: 5px;
   color: var(--b3-theme-on-surface);
@@ -216,6 +226,31 @@
 .kai-setting-textarea {
   min-height: 110px;
   resize: vertical;
+}
+
+.kai-compose-dialog {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.kai-compose-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 16px 12px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.kai-compose-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--b3-border-color);
+  background: var(--b3-theme-background);
 }
 
 .kai-grid {
@@ -329,8 +364,8 @@
 }
 
 .kai-log {
-  min-height: 96px;
-  max-height: 180px;
+  min-height: 72px;
+  max-height: 150px;
   overflow: auto;
   margin: 0;
   padding: 10px;
@@ -367,5 +402,13 @@
   .kai-pane-head {
     grid-template-columns: 1fr;
     display: grid;
+  }
+
+  .kai-chat-pane {
+    min-height: auto;
+  }
+
+  .kai-compose-actions {
+    flex-wrap: wrap;
   }
 }

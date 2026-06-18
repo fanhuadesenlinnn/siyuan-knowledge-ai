@@ -323,31 +323,22 @@ class SiyuanKnowledgeAI extends Plugin {
               <div class="kai-status" data-kai-index-status>读取中...</div>
               <progress class="kai-progress" data-kai-progress value="0" max="1"></progress>
               <div class="kai-actions kai-actions-stack">
-                <button class="b3-button" data-kai-action="build-index">更新全库索引</button>
+                <button class="b3-button" data-kai-action="build-index">更新索引</button>
                 <button class="b3-button b3-button--outline" data-kai-action="refresh-index">刷新状态</button>
                 <button class="b3-button b3-button--outline" data-kai-action="clear-index">清空索引</button>
               </div>
             </section>
 
             <section class="kai-section">
-              <div class="kai-section-head">写入位置</div>
-              <label>笔记本
-                <select class="b3-select kai-input" data-kai-config="defaultNotebook">
-                  <option value="${escapeHtml(config.defaultNotebook)}">${escapeHtml(config.defaultNotebook || "未选择")}</option>
-                </select>
-              </label>
-              <label>路径
-                <input class="b3-text-field kai-input" data-kai-config="defaultPath" value="${escapeHtml(config.defaultPath)}">
-              </label>
-              <button class="b3-button b3-button--outline" data-kai-action="load-notebooks">读取笔记本</button>
-            </section>
-
-            <section class="kai-section">
               <div class="kai-section-head">模型</div>
               <div class="kai-kv"><span>Chat</span><strong>${escapeHtml(config.chatModel)}</strong></div>
               <div class="kai-kv"><span>Embedding</span><strong>${escapeHtml(config.embeddingModel)}</strong></div>
-              <div class="kai-kv"><span>Base URL</span><strong>${escapeHtml(config.baseUrl)}</strong></div>
               <button class="b3-button b3-button--outline" data-kai-action="open-settings">插件设置</button>
+            </section>
+
+            <section class="kai-section kai-log-section">
+              <div class="kai-section-head">状态</div>
+              <pre class="kai-log" data-kai-log></pre>
             </section>
           </aside>
 
@@ -358,65 +349,21 @@ class SiyuanKnowledgeAI extends Plugin {
                   <h2>全库问答</h2>
                   <p>基于同步索引检索全库笔记，回答会带引用来源。</p>
                 </div>
-                <button class="b3-button b3-button--outline" data-kai-action="copy-answer">复制回答</button>
               </div>
               <textarea class="b3-text-field kai-question" data-kai-question placeholder="问你的思源全库笔记..."></textarea>
               <div class="kai-actions">
                 <button class="b3-button" data-kai-action="ask">提问</button>
-                <button class="b3-button b3-button--outline" data-kai-action="save-answer-doc">回答存为新文档</button>
-                <button class="b3-button b3-button--outline" data-kai-action="append-answer-doc">追加回答到当前文档</button>
+                <button class="b3-button b3-button--outline" data-kai-action="copy-answer">复制回答</button>
               </div>
               <div class="kai-answer" data-kai-answer></div>
+              <div class="kai-actions kai-answer-actions">
+                <button class="b3-button b3-button--outline" data-kai-action="save-answer-doc">回答存为新文档</button>
+                <button class="b3-button b3-button--outline" data-kai-action="append-answer-doc">追加回答到当前文档</button>
+                <button class="b3-button b3-button--outline" data-kai-action="open-new-note">生成新笔记</button>
+                <button class="b3-button b3-button--outline" data-kai-action="open-update-block">改写当前块</button>
+              </div>
               <div class="kai-sources" data-kai-sources></div>
             </section>
-
-            <section class="kai-pane kai-write-pane">
-              <div class="kai-pane-head">
-                <div>
-                  <h2>添加笔记</h2>
-                  <p>先生成草稿，确认后再写入思源。</p>
-                </div>
-              </div>
-              <div class="kai-grid">
-                <label>标题
-                  <input class="b3-text-field kai-input" data-kai-new-note-title value="AI 笔记">
-                </label>
-                <label>保存路径
-                  <input class="b3-text-field kai-input" data-kai-new-note-path value="${escapeHtml(config.defaultPath)}">
-                </label>
-              </div>
-              <textarea class="b3-text-field kai-prompt" data-kai-new-note-prompt placeholder="描述要新增的笔记，例如：根据刚才回答整理成一份运维检查清单。"></textarea>
-              <div class="kai-actions">
-                <button class="b3-button" data-kai-action="draft-note">生成新笔记草稿</button>
-                <button class="b3-button b3-button--outline" data-kai-action="create-note">确认创建新文档</button>
-              </div>
-              <textarea class="b3-text-field kai-draft" data-kai-new-note-draft placeholder="新笔记草稿会出现在这里，可手动编辑后再创建。"></textarea>
-            </section>
-
-            <section class="kai-pane kai-write-pane">
-              <div class="kai-pane-head">
-                <div>
-                  <h2>修改笔记块</h2>
-                  <p>选择块 ID，生成改写草稿，确认后覆盖该块。</p>
-                </div>
-              </div>
-              <div class="kai-grid">
-                <label>目标块 ID
-                  <input class="b3-text-field kai-input" data-kai-target-block placeholder="可从引用来源选择，也可留空使用当前文档块">
-                </label>
-                <label>操作
-                  <button class="b3-button b3-button--outline kai-inline-button" data-kai-action="use-current-block">使用当前块</button>
-                </label>
-              </div>
-              <textarea class="b3-text-field kai-prompt" data-kai-update-instruction placeholder="说明要怎么修改，例如：补充成正式周报格式，保留原有账号密码，不要删减事实。"></textarea>
-              <div class="kai-actions">
-                <button class="b3-button" data-kai-action="draft-update">生成修改草稿</button>
-                <button class="b3-button b3-button--outline" data-kai-action="apply-update">确认覆盖目标块</button>
-              </div>
-              <textarea class="b3-text-field kai-draft" data-kai-update-draft placeholder="修改草稿会出现在这里，可手动编辑后再覆盖。"></textarea>
-            </section>
-
-            <pre class="kai-log" data-kai-log></pre>
           </main>
         </div>
       </div>
@@ -437,13 +384,12 @@ class SiyuanKnowledgeAI extends Plugin {
         if (blockId) {
           await this.openBlock(blockId);
         } else if (targetSource) {
-          this.setTargetBlock(root, targetSource);
+          this.openUpdateBlockDialog(root, targetSource);
         } else if (action === "open-settings") {
           this.setting.open(this.name);
         } else if (action === "load-notebooks") {
           await this.loadNotebookOptions(root);
         } else if (action === "build-index") {
-          await this.readWorkbenchSettings(root);
           await this.buildIndex(root);
         } else if (action === "refresh-index") {
           await this.refreshWorkbench(root);
@@ -457,6 +403,10 @@ class SiyuanKnowledgeAI extends Plugin {
           await this.saveAnswerAsDocument(root);
         } else if (action === "append-answer-doc") {
           await this.appendAnswerToCurrentDocument(root);
+        } else if (action === "open-new-note") {
+          this.openNewNoteDialog(root);
+        } else if (action === "open-update-block") {
+          this.openUpdateBlockDialog(root);
         } else if (action === "draft-note") {
           await this.draftNewNote(root);
         } else if (action === "create-note") {
@@ -496,6 +446,143 @@ class SiyuanKnowledgeAI extends Plugin {
   refreshAllWorkbenches() {
     for (const root of this.activeRoots) {
       this.refreshWorkbench(root);
+    }
+  }
+
+  openNewNoteDialog(logRoot) {
+    const dialog = new Dialog({
+      title: "生成新笔记",
+      content: this.renderNewNoteDialog(),
+      width: "min(760px, 92vw)",
+      height: "min(680px, 86vh)",
+    });
+    const root = dialog.element.querySelector(".kai-compose-dialog");
+    this.bindNewNoteDialog(root, dialog, logRoot);
+  }
+
+  renderNewNoteDialog() {
+    return `
+      <div class="kai-compose-dialog">
+        <div class="kai-compose-body">
+          <div class="kai-grid">
+            <label>标题
+              <input class="b3-text-field kai-input" data-kai-new-note-title value="AI 笔记">
+            </label>
+            <label>保存路径
+              <input class="b3-text-field kai-input" data-kai-new-note-path value="${escapeHtml(this.config.defaultPath)}">
+            </label>
+          </div>
+          <label>要求
+            <textarea class="b3-text-field kai-prompt" data-kai-new-note-prompt placeholder="描述要新增的笔记，例如：根据刚才回答整理成一份运维检查清单。"></textarea>
+          </label>
+          <label>草稿
+            <textarea class="b3-text-field kai-draft" data-kai-new-note-draft placeholder="先生成草稿，确认后再创建新文档。"></textarea>
+          </label>
+        </div>
+        <div class="kai-compose-actions">
+          <button class="b3-button b3-button--cancel" data-kai-dialog-action="cancel">取消</button>
+          <button class="b3-button b3-button--outline" data-kai-dialog-action="draft-note">生成草稿</button>
+          <button class="b3-button" data-kai-dialog-action="create-note">创建新文档</button>
+        </div>
+      </div>
+    `;
+  }
+
+  bindNewNoteDialog(root, dialog, logRoot) {
+    if (!root) return;
+    root.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-kai-dialog-action]");
+      if (!button) return;
+      event.preventDefault();
+      const action = button.getAttribute("data-kai-dialog-action");
+      if (action === "cancel") {
+        dialog.destroy();
+        return;
+      }
+      await this.runDialogAction(button, async () => {
+        if (action === "draft-note") {
+          await this.draftNewNote(root, logRoot);
+        } else if (action === "create-note") {
+          const created = await this.createDraftNote(root, logRoot);
+          if (created) dialog.destroy();
+        }
+      });
+    });
+  }
+
+  openUpdateBlockDialog(logRoot, blockId) {
+    const dialog = new Dialog({
+      title: "改写笔记块",
+      content: this.renderUpdateBlockDialog(blockId),
+      width: "min(760px, 92vw)",
+      height: "min(700px, 86vh)",
+    });
+    const root = dialog.element.querySelector(".kai-compose-dialog");
+    this.bindUpdateBlockDialog(root, dialog, logRoot);
+  }
+
+  renderUpdateBlockDialog(blockId) {
+    return `
+      <div class="kai-compose-dialog">
+        <div class="kai-compose-body">
+          <div class="kai-grid kai-target-grid">
+            <label>目标块 ID
+              <input class="b3-text-field kai-input" data-kai-target-block value="${escapeHtml(blockId || "")}" placeholder="可从引用来源进入，也可使用当前块">
+            </label>
+            <label>操作
+              <button class="b3-button b3-button--outline kai-inline-button" data-kai-dialog-action="use-current-block">使用当前块</button>
+            </label>
+          </div>
+          <label>修改要求
+            <textarea class="b3-text-field kai-prompt" data-kai-update-instruction placeholder="说明要怎么修改，例如：整理成正式周报格式，保留事实，不要删减关键信息。"></textarea>
+          </label>
+          <label>修改草稿
+            <textarea class="b3-text-field kai-draft" data-kai-update-draft placeholder="先生成修改草稿，确认后再覆盖目标块。"></textarea>
+          </label>
+        </div>
+        <div class="kai-compose-actions">
+          <button class="b3-button b3-button--cancel" data-kai-dialog-action="cancel">取消</button>
+          <button class="b3-button b3-button--outline" data-kai-dialog-action="draft-update">生成草稿</button>
+          <button class="b3-button" data-kai-dialog-action="apply-update">覆盖目标块</button>
+        </div>
+      </div>
+    `;
+  }
+
+  bindUpdateBlockDialog(root, dialog, logRoot) {
+    if (!root) return;
+    root.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-kai-dialog-action]");
+      if (!button) return;
+      event.preventDefault();
+      const action = button.getAttribute("data-kai-dialog-action");
+      if (action === "cancel") {
+        dialog.destroy();
+        return;
+      }
+      await this.runDialogAction(button, async () => {
+        if (action === "use-current-block") {
+          await this.useCurrentBlock(root, logRoot);
+        } else if (action === "draft-update") {
+          await this.draftBlockUpdate(root, logRoot);
+        } else if (action === "apply-update") {
+          const updated = await this.applyBlockUpdate(root, logRoot);
+          if (updated) dialog.destroy();
+        }
+      });
+    });
+  }
+
+  async runDialogAction(button, callback) {
+    const previousDisabled = button.disabled;
+    button.disabled = true;
+    try {
+      await callback();
+    } catch (error) {
+      console.error("Knowledge AI dialog action failed", error);
+      showMessage(`Knowledge AI：${error.message || error}`, 7000, "error");
+    } finally {
+      button.disabled = previousDisabled;
     }
   }
 
@@ -770,7 +857,6 @@ class SiyuanKnowledgeAI extends Plugin {
   }
 
   async ask(root) {
-    await this.readWorkbenchSettings(root);
     const question = root.querySelector("[data-kai-question]").value.trim();
     if (!question) throw new Error("请输入问题");
 
@@ -854,7 +940,7 @@ class SiyuanKnowledgeAI extends Plugin {
               <div class="kai-source-text">${escapeHtml(chunk.text.slice(0, 320))}</div>
               <div class="kai-actions">
                 <button class="b3-button b3-button--outline" data-kai-open-block="${escapeHtml(chunk.blockId)}">打开引用</button>
-                <button class="b3-button b3-button--outline" data-kai-target-source="${escapeHtml(chunk.blockId)}">作为修改目标</button>
+                <button class="b3-button b3-button--outline" data-kai-target-source="${escapeHtml(chunk.blockId)}">改写此引用</button>
               </div>
             </div>
           </div>
@@ -905,7 +991,6 @@ class SiyuanKnowledgeAI extends Plugin {
   async saveAnswerAsDocument(root) {
     this.ensureWriteAllowed();
     if (!this.lastAnswer) throw new Error("没有可保存的回答");
-    await this.readWorkbenchSettings(root);
     const notebook = await this.resolveNotebook();
     const title = window.prompt("文档标题", `AI 回答 ${new Date().toLocaleString()}`);
     if (!title) return;
@@ -938,9 +1023,9 @@ class SiyuanKnowledgeAI extends Plugin {
     showMessage("Knowledge AI：已追加到当前文档");
   }
 
-  async draftNewNote(root) {
-    const title = root.querySelector("[data-kai-new-note-title]").value.trim() || "AI 笔记";
-    const prompt = root.querySelector("[data-kai-new-note-prompt]").value.trim();
+  async draftNewNote(formRoot, logRoot) {
+    const title = formRoot.querySelector("[data-kai-new-note-title]").value.trim() || "AI 笔记";
+    const prompt = formRoot.querySelector("[data-kai-new-note-prompt]").value.trim();
     if (!prompt && !this.lastAnswer) throw new Error("请输入新笔记要求，或先完成一次问答");
     const messages = [
       {
@@ -963,49 +1048,49 @@ class SiyuanKnowledgeAI extends Plugin {
         ].join("\n"),
       },
     ];
-    this.setLog(root, "生成新笔记草稿");
+    this.setLog(logRoot || formRoot, "生成新笔记草稿");
     const draft = await this.chat(messages);
     this.noteDraft = draft;
-    root.querySelector("[data-kai-new-note-draft]").value = draft;
-    this.setLog(root, "新笔记草稿已生成，请确认后创建");
+    formRoot.querySelector("[data-kai-new-note-draft]").value = draft;
+    this.setLog(logRoot || formRoot, "新笔记草稿已生成，请确认后创建");
   }
 
-  async createDraftNote(root) {
+  async createDraftNote(formRoot, logRoot) {
     this.ensureWriteAllowed();
-    await this.readWorkbenchSettings(root);
     const notebook = await this.resolveNotebook();
-    const title = root.querySelector("[data-kai-new-note-title]").value.trim() || "AI 笔记";
-    const directory = normalizeDocPath(root.querySelector("[data-kai-new-note-path]").value || this.config.defaultPath);
-    const draft = root.querySelector("[data-kai-new-note-draft]").value.trim();
+    const title = formRoot.querySelector("[data-kai-new-note-title]").value.trim() || "AI 笔记";
+    const directory = normalizeDocPath(formRoot.querySelector("[data-kai-new-note-path]").value || this.config.defaultPath);
+    const draft = formRoot.querySelector("[data-kai-new-note-draft]").value.trim();
     if (!draft) throw new Error("没有可创建的新笔记草稿");
     const path = `${directory}/${safePathSegment(title)}`;
-    if (!window.confirm(`创建新文档：${path}`)) return;
+    if (!window.confirm(`创建新文档：${path}`)) return false;
     const id = await this.siyuanPost("/api/filetree/createDocWithMd", {
       notebook,
       path,
       markdown: `# ${title}\n\n${draft}`,
     });
-    this.setLog(root, `已创建新笔记 ${id || path}`);
+    this.setLog(logRoot || formRoot, `已创建新笔记 ${id || path}`);
     showMessage("Knowledge AI：新笔记已创建");
+    return true;
   }
 
-  setTargetBlock(root, blockId) {
-    const input = root.querySelector("[data-kai-target-block]");
+  setTargetBlock(formRoot, blockId, logRoot) {
+    const input = formRoot.querySelector("[data-kai-target-block]");
     if (input) input.value = blockId;
-    this.setLog(root, `修改目标已设置为 ${blockId}`);
+    this.setLog(logRoot || formRoot, `修改目标已设置为 ${blockId}`);
   }
 
-  async useCurrentBlock(root) {
+  async useCurrentBlock(formRoot, logRoot) {
     const blockId = await this.getCurrentBlockId();
     if (!blockId) throw new Error("没有找到当前块");
-    this.setTargetBlock(root, blockId);
+    this.setTargetBlock(formRoot, blockId, logRoot);
   }
 
-  async draftBlockUpdate(root) {
-    const input = root.querySelector("[data-kai-target-block]");
+  async draftBlockUpdate(formRoot, logRoot) {
+    const input = formRoot.querySelector("[data-kai-target-block]");
     const blockId = (input && input.value.trim()) || (await this.getCurrentBlockId());
     if (!blockId) throw new Error("请输入目标块 ID，或先打开一个文档");
-    const instruction = root.querySelector("[data-kai-update-instruction]").value.trim();
+    const instruction = formRoot.querySelector("[data-kai-update-instruction]").value.trim();
     if (!instruction) throw new Error("请输入修改要求");
     const data = await this.siyuanPost("/api/block/getBlockKramdown", { id: blockId });
     const original = data && data.kramdown ? data.kramdown : "";
@@ -1026,27 +1111,28 @@ class SiyuanKnowledgeAI extends Plugin {
         ].join("\n"),
       },
     ];
-    this.setLog(root, `生成块 ${blockId} 的修改草稿`);
+    this.setLog(logRoot || formRoot, `生成块 ${blockId} 的修改草稿`);
     const draft = await this.chat(messages);
     this.updateDraft = { blockId, original, draft };
-    root.querySelector("[data-kai-update-draft]").value = draft;
-    this.setLog(root, "修改草稿已生成，请确认后覆盖");
+    formRoot.querySelector("[data-kai-update-draft]").value = draft;
+    this.setLog(logRoot || formRoot, "修改草稿已生成，请确认后覆盖");
   }
 
-  async applyBlockUpdate(root) {
+  async applyBlockUpdate(formRoot, logRoot) {
     this.ensureWriteAllowed();
-    const blockId = root.querySelector("[data-kai-target-block]").value.trim() || (this.updateDraft && this.updateDraft.blockId);
-    const draft = root.querySelector("[data-kai-update-draft]").value.trim();
+    const blockId = formRoot.querySelector("[data-kai-target-block]").value.trim() || (this.updateDraft && this.updateDraft.blockId);
+    const draft = formRoot.querySelector("[data-kai-update-draft]").value.trim();
     if (!blockId) throw new Error("没有目标块 ID");
     if (!draft) throw new Error("没有可应用的修改草稿");
-    if (!window.confirm(`确认覆盖块 ${blockId}？此操作会修改思源笔记内容。`)) return;
+    if (!window.confirm(`确认覆盖块 ${blockId}？此操作会修改思源笔记内容。`)) return false;
     await this.siyuanPost("/api/block/updateBlock", {
       id: blockId,
       dataType: "markdown",
       data: draft,
     });
-    this.setLog(root, `已覆盖块 ${blockId}`);
+    this.setLog(logRoot || formRoot, `已覆盖块 ${blockId}`);
     showMessage("Knowledge AI：目标块已更新");
+    return true;
   }
 
   async resolveNotebook() {
