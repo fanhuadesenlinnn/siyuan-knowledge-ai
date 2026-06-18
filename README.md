@@ -1,22 +1,48 @@
 # Knowledge AI for SiYuan
 
-一个无单独后端的思源笔记 AI 助手。每台机器安装同一个插件，索引数据写入思源工作区：
+一个无单独后端的思源笔记全库 AI 助手。插件通过思源 API 读取和写入笔记，索引分片写入思源工作区：
 
 ```text
 data/storage/petal/siyuan-knowledge-ai/index/
 ```
 
-如果你的思源工作区通过官方 S3 同步，多台机器会同步这份索引分片。插件只通过当前机器的思源 API 读取和写入笔记，不直接修改 `.sy` 文件，也不直接操作 S3 对象。
+如果你的思源工作区通过官方同步或 S3 同步，多台机器会同步这份索引。其他设备只要模型配置一致，就可以直接读取索引问答，不需要重复消耗 Embedding token 重建索引。
 
 ## 能力
 
-- 基于全库笔记建立本地向量索引
-- 索引分片随思源数据同步
-- 支持 ChatGPT/OpenAI API
-- 支持通用 OpenAI-compatible API
-- 基于笔记片段问答并显示引用来源
-- 将回答保存为新文档
-- 将回答追加到当前文档
+- 全库笔记手动建立本地向量索引
+- 索引 manifest 与分片随思源数据同步
+- 支持 OpenAI 官方和 OpenAI-compatible API
+- 支持可留空 API Key 的本地兼容服务，例如 Ollama OpenAI-compatible endpoint
+- 基于全库笔记片段问答并显示引用来源
+- 顶栏入口打开独立 Knowledge AI 工作台页签
+- 思源插件设置页管理模型、索引和写入选项
+- 将回答保存为新文档或追加到当前文档
+- 根据指令生成新笔记草稿，确认后创建文档
+- 根据指令改写指定块，确认后覆盖目标块
+
+## 在思源中使用
+
+1. 将插件安装到思源工作区：
+
+```text
+data/plugins/siyuan-knowledge-ai/
+```
+
+2. 重启思源。
+3. 打开 `设置 -> 集市 -> 已下载 -> 插件`。
+4. 启用 `Knowledge AI`。
+5. 在插件列表中点击 `设置`，填写 Base URL、模型和 API Key。
+6. 点击思源顶部栏的 `Knowledge AI` 图标，打开工作台。
+7. 在工作台点击 `更新全库索引`。
+8. 等待索引写入完成后开始提问。
+
+## 多设备同步
+
+- 只需要在一台机器上点击 `更新全库索引`。
+- 等待思源同步完成后，其他设备打开工作台并点击 `刷新状态`。
+- 其他设备的 `Embedding 模型` 必须和索引 manifest 中记录的模型一致。
+- API Key 只保存在当前设备的 `localStorage`，不会写入同步目录。
 
 ## 模型接口
 
@@ -26,56 +52,44 @@ data/storage/petal/siyuan-knowledge-ai/index/
 - Chat model: `gpt-4.1-mini`
 - Embedding model: `text-embedding-3-small`
 
-也可以填写任何兼容 OpenAI API 的服务，例如 DeepSeek、OpenRouter、硅基流动、Ollama OpenAI-compatible endpoint 等。服务需要同时提供：
+也可以填写任何兼容 OpenAI API 的服务。服务需要提供：
 
 - `POST /chat/completions`
 - `POST /embeddings`
 
+插件通过思源 `/api/network/forwardProxy` 调用模型接口，避免浏览器前端直接请求第三方 API 时的 CORS 问题。
+
+## 安全写入
+
+写入能力默认开启，但所有写入都会先让你确认：
+
+- 新建文档：调用 `/api/filetree/createDocWithMd`
+- 追加回答：调用 `/api/block/appendBlock`
+- 覆盖块内容：先生成草稿，再调用 `/api/block/updateBlock`
+
+如果只想问答，可以在插件设置中关闭 `允许写入笔记`。
+
 ## 隐私与同步
 
-- API Key 存在当前浏览器/思源运行环境的 `localStorage`，不会写入插件同步目录。
+- API Key 只保存在当前设备。
 - 索引分片包含笔记文本片段和 embedding，会跟随思源同步。
-- 如果你的 S3 同步目录是端到端加密的，索引会和其他思源数据一起被保护。
-- 如果不希望索引同步到其他机器，请不要使用本插件的索引同步目录。
-
-## 安装
-
-1. 下载或构建 `package.zip`。
-2. 解压到思源工作区：
-
-```text
-data/plugins/siyuan-knowledge-ai/
-```
-
-3. 重启思源。
-4. 在集市/插件列表中启用 `Knowledge AI`。
-
-## 使用
-
-1. 打开顶部栏的 `Knowledge AI`。
-2. 填写 Base URL、Chat 模型、Embedding 模型和 API Key。
-3. 点击 `保存`。
-4. 点击 `更新索引`。
-5. 提问。
-
-## 多机器使用建议
-
-- 只在一台机器上更新索引，等待思源 S3 同步完成后，其他机器直接使用同步后的索引。
-- 如果多台机器同时更新索引，最后同步成功的一份会覆盖旧索引。
-- 所有写入笔记的操作都在当前机器通过思源 API 执行，然后由思源 S3 同步到其他机器。
+- 插件不直接修改 `.sy` 文件，也不直接操作 S3 对象。
+- 所有笔记读写都通过当前设备的思源 API 完成。
 
 ## 开发
 
-这个插件没有构建步骤，源码就是插件运行文件。
-
 ```bash
+npm install
 npm run check
 npm test
-npm run pack
+npm run build
 ```
 
-## 当前限制
+构建后会生成：
 
-- v0.1.0 使用分片全量索引，尚未实现块级增量更新。
-- 回答采用非流式输出。
-- 写入能力只提供保存回答为新文档、追加到当前文档。
+```text
+dist/
+package.zip
+```
+
+`package.zip` 可作为思源插件包发布或安装。

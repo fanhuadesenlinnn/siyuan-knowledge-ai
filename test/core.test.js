@@ -3,10 +3,14 @@
 const assert = require("assert");
 const {
   blockToChunks,
+  buildModelProxyPayload,
   buildMessages,
   chunkText,
   cosineSimilarity,
+  extractChatContent,
+  extractEmbeddings,
   mergeConfig,
+  parseModelProxyJson,
   rankChunks,
   stableHash,
 } = require("../lib/core");
@@ -49,5 +53,37 @@ const messages = buildMessages(config, "测试问题", ranked);
 assert.strictEqual(messages.length, 2);
 assert.ok(messages[1].content.includes("测试问题"));
 assert.ok(messages[1].content.includes("[1]"));
+
+const proxyPayload = buildModelProxyPayload(
+  "https://api.example.com/v1/chat/completions",
+  "sk-test",
+  { model: "demo" },
+  5000,
+);
+assert.strictEqual(proxyPayload.method, "POST");
+assert.strictEqual(proxyPayload.payload, '{"model":"demo"}');
+assert.ok(proxyPayload.headers.some((item) => item.Authorization === "Bearer sk-test"));
+
+const parsed = parseModelProxyJson(
+  {
+    status: 200,
+    body: '{"choices":[{"message":{"content":"ok"}}]}',
+  },
+  "Chat",
+);
+assert.strictEqual(extractChatContent(parsed), "ok");
+assert.deepStrictEqual(
+  extractEmbeddings({
+    data: [
+      { index: 1, embedding: [0, 1] },
+      { index: 0, embedding: [1, 0] },
+    ],
+  }),
+  [
+    [1, 0],
+    [0, 1],
+  ],
+);
+assert.throws(() => parseModelProxyJson({ status: 401, body: "bad key" }, "Chat"), /401/);
 
 console.log("core tests passed");

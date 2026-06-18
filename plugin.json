@@ -2,15 +2,16 @@
   "name": "siyuan-knowledge-ai",
   "author": "fanhuadesenlinnn",
   "url": "https://github.com/fanhuadesenlinnn/siyuan-knowledge-ai",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minAppVersion": "3.6.0",
+  "disabledInPublish": false,
   "displayName": {
     "default": "Knowledge AI",
     "zh_CN": "Knowledge AI"
   },
   "description": {
-    "default": "Local-first SiYuan knowledge assistant with S3-synced index shards and OpenAI-compatible APIs.",
-    "zh_CN": "无后端的思源知识助手，索引分片随思源同步，支持 ChatGPT 和通用 OpenAI-compatible API。"
+    "default": "Whole-vault SiYuan AI assistant with synced local index shards, OpenAI-compatible APIs, and safe note writing.",
+    "zh_CN": "面向全库问答的思源 AI 助手，索引分片随思源同步，支持 OpenAI-compatible API，并提供确认后写入笔记。"
   },
   "readme": {
     "default": "README.md",

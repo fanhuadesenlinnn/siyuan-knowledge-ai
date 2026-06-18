@@ -1,12 +1,13 @@
 {
   "name": "siyuan-knowledge-ai",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Local-first SiYuan AI assistant with S3-synced index shards.",
   "scripts": {
-    "check": "node --check index.js && node --check lib/core.js",
+    "check": "node --check index.js && node --check lib/core.js && node --check scripts/build.js && node --check scripts/generate-assets.js",
     "test": "node test/core.test.js",
-    "pack": "rm -f package.zip && zip -r package.zip plugin.json index.js index.css README.md lib"
+    "build": "node scripts/generate-assets.js && node scripts/build.js",
+    "pack": "npm run build"
   },
   "keywords": [
     "siyuan",
@@ -15,5 +16,9 @@
     "rag",
     "openai"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "siyuan": "^1.2.1"
+  }
 }

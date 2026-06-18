@@ -5,31 +5,49 @@ const {
   DEFAULT_CONFIG,
   blockToChunks,
   buildMessages,
+  buildModelProxyPayload,
   clampNumber,
   escapeHtml,
   escapeSql,
+  extractChatContent,
+  extractEmbeddings,
   makeManifestPath,
   makeShardPath,
   mergeConfig,
   normalizeBaseUrl,
   nowIso,
+  parseModelProxyJson,
   rankChunks,
   stableHash,
 } = require("./lib/core");
 
-const { Dialog, Plugin, fetchSyncPost, openTab, showMessage } = siyuan;
+const {
+  Plugin,
+  Setting,
+  fetchSyncPost,
+  getActiveEditor,
+  openTab,
+  showMessage,
+} = siyuan;
 
 const PLUGIN_NAME = "siyuan-knowledge-ai";
 const CONFIG_FILE = "config.json";
 const API_KEY_STORAGE = `${PLUGIN_NAME}:api-key`;
+const TAB_TYPE = "knowledge-ai-workbench";
 const CURRENT_INDEX_VERSION = 1;
+const INDEX_ROOT = `/data/storage/petal/${PLUGIN_NAME}/index`;
 
 class SiyuanKnowledgeAI extends Plugin {
   async onload() {
     this.config = await this.loadConfig();
     this.lastAnswer = "";
+    this.lastQuestion = "";
     this.lastSources = [];
+    this.noteDraft = "";
+    this.updateDraft = null;
+    this.activeRoots = new Set();
     this.indexTimer = null;
+    this.indexing = false;
 
     this.addIcons(`
       <symbol id="iconKnowledgeAI" viewBox="0 0 24 24">
@@ -38,17 +56,13 @@ class SiyuanKnowledgeAI extends Plugin {
       </symbol>
     `);
 
-    this.addTopBar({
-      icon: "iconKnowledgeAI",
-      title: "Knowledge AI",
-      position: "right",
-      callback: () => this.openMainDialog(),
-    });
+    this.registerWorkbenchTab();
+    this.createSettingPanel();
 
     this.addCommand({
       langKey: "openKnowledgeAI",
       hotkey: "",
-      callback: () => this.openMainDialog(),
+      callback: () => this.openWorkbench(),
     });
 
     this.startIndexSchedule();
@@ -57,8 +71,133 @@ class SiyuanKnowledgeAI extends Plugin {
     }
   }
 
+  onLayoutReady() {
+    if (this.topBarElement) return;
+    this.topBarElement = this.addTopBar({
+      icon: "iconKnowledgeAI",
+      title: "Knowledge AI",
+      position: "right",
+      callback: () => this.openWorkbench(),
+    });
+  }
+
   onunload() {
     if (this.indexTimer) window.clearInterval(this.indexTimer);
+    this.activeRoots.clear();
+  }
+
+  registerWorkbenchTab() {
+    const plugin = this;
+    this.workbenchFactory = this.addTab({
+      type: TAB_TYPE,
+      init() {
+        plugin.initWorkbench(this);
+      },
+      update() {
+        plugin.refreshWorkbench(this.data && this.data.root);
+      },
+      destroy() {
+        if (this.data && this.data.root) plugin.activeRoots.delete(this.data.root);
+      },
+    });
+  }
+
+  async openWorkbench() {
+    await openTab({
+      app: this.app,
+      custom: {
+        id: `${this.name}${TAB_TYPE}`,
+        icon: "iconKnowledgeAI",
+        title: "Knowledge AI",
+        data: {},
+      },
+      keepCursor: false,
+    });
+  }
+
+  initWorkbench(customTab) {
+    customTab.element.classList.add("kai-workbench-host");
+    customTab.element.innerHTML = this.renderWorkbench();
+    const root = customTab.element.querySelector(".kai-root");
+    customTab.data = Object.assign({}, customTab.data || {}, { root });
+    this.activeRoots.add(root);
+    this.bindWorkbench(root);
+    this.refreshWorkbench(root);
+  }
+
+  createSettingPanel() {
+    this.settingElements = {};
+    this.setting = new Setting({
+      width: "760px",
+      height: "720px",
+      confirmCallback: () => this.saveSettingPanel(),
+    });
+
+    this.addSettingInput("baseUrl", "接口地址", "OpenAI 或 OpenAI-compatible Base URL，例如 https://api.openai.com/v1。");
+    this.addSettingInput("apiKey", "API Key", "本机保存，不写入同步索引；本地 Ollama 可留空。", { password: true, local: true });
+    this.addSettingInput("chatModel", "聊天模型", "用于回答、生成草稿和改写笔记。");
+    this.addSettingInput("embeddingModel", "Embedding 模型", "用于全库索引和提问检索；换模型后需要重建索引。");
+    this.addSettingInput("temperature", "温度", "回答和草稿生成的随机性。", { number: true, step: "0.1", min: "0", max: "2" });
+    this.addSettingInput("topK", "引用数量", "每次问答最多送入模型的笔记片段数。", { number: true, min: "1", max: "30" });
+    this.addSettingInput("maxIndexedBlocks", "索引块上限", "手动更新索引时最多读取多少个思源块。", { number: true, min: "100" });
+    this.addSettingInput("chunkSize", "片段长度", "单个索引片段的最大字符数。", { number: true, min: "200" });
+    this.addSettingInput("chunkOverlap", "片段重叠", "相邻片段保留的重叠字符数。", { number: true, min: "0" });
+    this.addSettingInput("batchSize", "向量批量", "每次 Embedding 请求包含的片段数。", { number: true, min: "1", max: "128" });
+    this.addSettingInput("shardSize", "分片大小", "每个同步索引分片保存的片段数。", { number: true, min: "20", max: "500" });
+    this.addSettingInput("modelTimeoutMs", "模型超时毫秒", "通过思源代理调用模型接口的超时时间。", { number: true, min: "1000" });
+    this.addSettingInput("defaultNotebook", "默认笔记本 ID", "新增笔记保存到这个笔记本；也可在工作台中读取并选择。");
+    this.addSettingInput("defaultPath", "默认保存路径", "新增 AI 笔记的父路径。");
+    this.addSettingInput("allowWriteActions", "允许写入笔记", "关闭后只能问答，不能新增、追加或修改笔记。", { checkbox: true });
+    this.addSettingInput("autoIndexOnStart", "启动后定期更新", "启用后按下方间隔自动重建索引。", { checkbox: true });
+    this.addSettingInput("autoIndexEveryHours", "自动索引间隔小时", "仅在启用定期更新时生效。", { number: true, min: "1" });
+    this.addSettingInput("systemPrompt", "系统提示词", "问答时使用的系统提示词。", { textarea: true });
+  }
+
+  addSettingInput(key, title, description, options) {
+    const settingOptions = options || {};
+    this.setting.addItem({
+      title,
+      description,
+      direction: settingOptions.textarea ? "column" : "row",
+      createActionElement: () => {
+        const element = settingOptions.textarea ? document.createElement("textarea") : document.createElement("input");
+        element.className = settingOptions.textarea ? "b3-text-field kai-setting-textarea" : "b3-text-field kai-setting-input";
+        if (settingOptions.checkbox) {
+          element.type = "checkbox";
+          element.className = "b3-switch fn__flex-shrink";
+          element.checked = Boolean(this.config[key]);
+        } else {
+          element.type = settingOptions.password ? "password" : settingOptions.number ? "number" : "text";
+          if (settingOptions.step) element.step = settingOptions.step;
+          if (settingOptions.min) element.min = settingOptions.min;
+          if (settingOptions.max) element.max = settingOptions.max;
+          element.value = settingOptions.local ? this.getApiKey() : String(this.config[key] == null ? "" : this.config[key]);
+        }
+        element.dataset.kaiSettingKey = key;
+        if (settingOptions.local) element.dataset.kaiLocal = "true";
+        this.settingElements[key] = element;
+        return element;
+      },
+    });
+  }
+
+  async saveSettingPanel() {
+    const next = Object.assign({}, this.config);
+    for (const [key, element] of Object.entries(this.settingElements || {})) {
+      if (!element) continue;
+      if (element.dataset.kaiLocal === "true") {
+        this.setApiKey(element.value);
+      } else if (element.type === "checkbox") {
+        next[key] = element.checked;
+      } else if (element.type === "number") {
+        next[key] = Number(element.value);
+      } else {
+        next[key] = element.value;
+      }
+    }
+    await this.saveConfig(next);
+    this.refreshAllWorkbenches();
+    showMessage("Knowledge AI：设置已保存");
   }
 
   async loadConfig() {
@@ -85,6 +224,7 @@ class SiyuanKnowledgeAI extends Plugin {
     merged.chunkOverlap = clampNumber(merged.chunkOverlap, 0, Math.floor(merged.chunkSize / 2), DEFAULT_CONFIG.chunkOverlap);
     merged.batchSize = clampNumber(merged.batchSize, 1, 128, DEFAULT_CONFIG.batchSize);
     merged.shardSize = clampNumber(merged.shardSize, 20, 500, DEFAULT_CONFIG.shardSize);
+    merged.modelTimeoutMs = clampNumber(merged.modelTimeoutMs, 1000, 10 * 60 * 1000, DEFAULT_CONFIG.modelTimeoutMs);
     merged.autoIndexEveryHours = clampNumber(
       merged.autoIndexEveryHours,
       1,
@@ -92,6 +232,8 @@ class SiyuanKnowledgeAI extends Plugin {
       DEFAULT_CONFIG.autoIndexEveryHours,
     );
     merged.baseUrl = normalizeBaseUrl(merged.baseUrl);
+    merged.allowWriteActions = Boolean(merged.allowWriteActions);
+    merged.autoIndexOnStart = Boolean(merged.autoIndexOnStart);
     this.config = merged;
     await this.saveData(CONFIG_FILE, merged);
     this.startIndexSchedule();
@@ -115,141 +257,169 @@ class SiyuanKnowledgeAI extends Plugin {
     }, hours * 60 * 60 * 1000);
   }
 
-  openMainDialog() {
-    const dialog = new Dialog({
-      title: "Knowledge AI",
-      content: this.renderDialog(),
-      width: "min(1100px, 92vw)",
-      height: "min(820px, 88vh)",
-      destroyCallback: () => {},
-    });
-    const root = dialog.element.querySelector(".kai-root");
-    this.bindDialog(root);
-    this.refreshIndexStatus(root);
-  }
-
-  renderDialog() {
+  renderWorkbench() {
     const config = this.config || DEFAULT_CONFIG;
     return `
       <div class="kai-root">
-        <div class="kai-layout">
-          <section class="kai-panel kai-settings">
-            <div class="kai-section-title">模型</div>
-            <label>接口地址
-              <input class="b3-text-field kai-input" data-kai-config="baseUrl" value="${escapeHtml(config.baseUrl)}">
-            </label>
-            <label>聊天模型
-              <input class="b3-text-field kai-input" data-kai-config="chatModel" value="${escapeHtml(config.chatModel)}">
-            </label>
-            <label>Embedding 模型
-              <input class="b3-text-field kai-input" data-kai-config="embeddingModel" value="${escapeHtml(config.embeddingModel)}">
-            </label>
-            <label>API Key
-              <input class="b3-text-field kai-input" type="password" data-kai-api-key value="${escapeHtml(this.getApiKey())}">
-            </label>
-            <div class="kai-grid">
-              <label>温度
-                <input class="b3-text-field kai-input" type="number" step="0.1" min="0" max="2" data-kai-config="temperature" value="${escapeHtml(config.temperature)}">
-              </label>
-              <label>引用数
-                <input class="b3-text-field kai-input" type="number" min="1" max="30" data-kai-config="topK" value="${escapeHtml(config.topK)}">
-              </label>
-            </div>
-
-            <div class="kai-section-title">索引</div>
-            <div class="kai-grid">
-              <label>块上限
-                <input class="b3-text-field kai-input" type="number" min="100" data-kai-config="maxIndexedBlocks" value="${escapeHtml(config.maxIndexedBlocks)}">
-              </label>
-              <label>分片大小
-                <input class="b3-text-field kai-input" type="number" min="20" data-kai-config="shardSize" value="${escapeHtml(config.shardSize)}">
-              </label>
-            </div>
-            <label class="kai-check">
-              <input type="checkbox" data-kai-config="autoIndexOnStart" ${config.autoIndexOnStart ? "checked" : ""}>
-              启动后定期更新
-            </label>
-            <label>间隔小时
-              <input class="b3-text-field kai-input" type="number" min="1" data-kai-config="autoIndexEveryHours" value="${escapeHtml(config.autoIndexEveryHours)}">
-            </label>
-
-            <div class="kai-section-title">写入</div>
-            <label>默认笔记本
-              <select class="b3-select kai-input" data-kai-config="defaultNotebook">
-                <option value="${escapeHtml(config.defaultNotebook)}">${escapeHtml(config.defaultNotebook || "未选择")}</option>
-              </select>
-            </label>
-            <label>默认路径
-              <input class="b3-text-field kai-input" data-kai-config="defaultPath" value="${escapeHtml(config.defaultPath)}">
-            </label>
-            <label>系统提示词
-              <textarea class="b3-text-field kai-input kai-system" data-kai-config="systemPrompt">${escapeHtml(config.systemPrompt)}</textarea>
-            </label>
-
-            <div class="kai-actions">
-              <button class="b3-button" data-kai-action="save-settings">保存</button>
-              <button class="b3-button b3-button--outline" data-kai-action="load-notebooks">笔记本</button>
-            </div>
-          </section>
-
-          <section class="kai-panel kai-main">
-            <div class="kai-indexbar">
+        <div class="kai-shell">
+          <aside class="kai-sidebar">
+            <div class="kai-brand">
+              <svg><use xlink:href="#iconKnowledgeAI"></use></svg>
               <div>
-                <div class="kai-section-title">本地知识索引</div>
-                <div class="kai-muted" data-kai-index-status>读取中...</div>
-              </div>
-              <div class="kai-actions">
-                <button class="b3-button" data-kai-action="build-index">更新索引</button>
-                <button class="b3-button b3-button--outline" data-kai-action="clear-index">清空</button>
+                <div class="kai-title">Knowledge AI</div>
+                <div class="kai-muted">全库问答与安全写入</div>
               </div>
             </div>
 
-            <div class="kai-chat">
-              <textarea class="b3-text-field kai-question" data-kai-question placeholder="问你的思源笔记..."></textarea>
-              <div class="kai-actions kai-chat-actions">
+            <section class="kai-section">
+              <div class="kai-section-head">索引</div>
+              <div class="kai-status" data-kai-index-status>读取中...</div>
+              <progress class="kai-progress" data-kai-progress value="0" max="1"></progress>
+              <div class="kai-actions kai-actions-stack">
+                <button class="b3-button" data-kai-action="build-index">更新全库索引</button>
+                <button class="b3-button b3-button--outline" data-kai-action="refresh-index">刷新状态</button>
+                <button class="b3-button b3-button--outline" data-kai-action="clear-index">清空索引</button>
+              </div>
+            </section>
+
+            <section class="kai-section">
+              <div class="kai-section-head">写入位置</div>
+              <label>笔记本
+                <select class="b3-select kai-input" data-kai-config="defaultNotebook">
+                  <option value="${escapeHtml(config.defaultNotebook)}">${escapeHtml(config.defaultNotebook || "未选择")}</option>
+                </select>
+              </label>
+              <label>路径
+                <input class="b3-text-field kai-input" data-kai-config="defaultPath" value="${escapeHtml(config.defaultPath)}">
+              </label>
+              <button class="b3-button b3-button--outline" data-kai-action="load-notebooks">读取笔记本</button>
+            </section>
+
+            <section class="kai-section">
+              <div class="kai-section-head">模型</div>
+              <div class="kai-kv"><span>Chat</span><strong>${escapeHtml(config.chatModel)}</strong></div>
+              <div class="kai-kv"><span>Embedding</span><strong>${escapeHtml(config.embeddingModel)}</strong></div>
+              <div class="kai-kv"><span>Base URL</span><strong>${escapeHtml(config.baseUrl)}</strong></div>
+              <button class="b3-button b3-button--outline" data-kai-action="open-settings">插件设置</button>
+            </section>
+          </aside>
+
+          <main class="kai-main">
+            <section class="kai-pane kai-chat-pane">
+              <div class="kai-pane-head">
+                <div>
+                  <h2>全库问答</h2>
+                  <p>基于同步索引检索全库笔记，回答会带引用来源。</p>
+                </div>
+                <button class="b3-button b3-button--outline" data-kai-action="copy-answer">复制回答</button>
+              </div>
+              <textarea class="b3-text-field kai-question" data-kai-question placeholder="问你的思源全库笔记..."></textarea>
+              <div class="kai-actions">
                 <button class="b3-button" data-kai-action="ask">提问</button>
-                <button class="b3-button b3-button--outline" data-kai-action="save-answer-doc">存为文档</button>
-                <button class="b3-button b3-button--outline" data-kai-action="append-answer-doc">追加到当前文档</button>
+                <button class="b3-button b3-button--outline" data-kai-action="save-answer-doc">回答存为新文档</button>
+                <button class="b3-button b3-button--outline" data-kai-action="append-answer-doc">追加回答到当前文档</button>
               </div>
               <div class="kai-answer" data-kai-answer></div>
               <div class="kai-sources" data-kai-sources></div>
-            </div>
+            </section>
+
+            <section class="kai-pane kai-write-pane">
+              <div class="kai-pane-head">
+                <div>
+                  <h2>添加笔记</h2>
+                  <p>先生成草稿，确认后再写入思源。</p>
+                </div>
+              </div>
+              <div class="kai-grid">
+                <label>标题
+                  <input class="b3-text-field kai-input" data-kai-new-note-title value="AI 笔记">
+                </label>
+                <label>保存路径
+                  <input class="b3-text-field kai-input" data-kai-new-note-path value="${escapeHtml(config.defaultPath)}">
+                </label>
+              </div>
+              <textarea class="b3-text-field kai-prompt" data-kai-new-note-prompt placeholder="描述要新增的笔记，例如：根据刚才回答整理成一份运维检查清单。"></textarea>
+              <div class="kai-actions">
+                <button class="b3-button" data-kai-action="draft-note">生成新笔记草稿</button>
+                <button class="b3-button b3-button--outline" data-kai-action="create-note">确认创建新文档</button>
+              </div>
+              <textarea class="b3-text-field kai-draft" data-kai-new-note-draft placeholder="新笔记草稿会出现在这里，可手动编辑后再创建。"></textarea>
+            </section>
+
+            <section class="kai-pane kai-write-pane">
+              <div class="kai-pane-head">
+                <div>
+                  <h2>修改笔记块</h2>
+                  <p>选择块 ID，生成改写草稿，确认后覆盖该块。</p>
+                </div>
+              </div>
+              <div class="kai-grid">
+                <label>目标块 ID
+                  <input class="b3-text-field kai-input" data-kai-target-block placeholder="可从引用来源选择，也可留空使用当前文档块">
+                </label>
+                <label>操作
+                  <button class="b3-button b3-button--outline kai-inline-button" data-kai-action="use-current-block">使用当前块</button>
+                </label>
+              </div>
+              <textarea class="b3-text-field kai-prompt" data-kai-update-instruction placeholder="说明要怎么修改，例如：补充成正式周报格式，保留原有账号密码，不要删减事实。"></textarea>
+              <div class="kai-actions">
+                <button class="b3-button" data-kai-action="draft-update">生成修改草稿</button>
+                <button class="b3-button b3-button--outline" data-kai-action="apply-update">确认覆盖目标块</button>
+              </div>
+              <textarea class="b3-text-field kai-draft" data-kai-update-draft placeholder="修改草稿会出现在这里，可手动编辑后再覆盖。"></textarea>
+            </section>
 
             <pre class="kai-log" data-kai-log></pre>
-          </section>
+          </main>
         </div>
       </div>
     `;
   }
 
-  bindDialog(root) {
+  bindWorkbench(root) {
     if (!root) return;
     root.addEventListener("click", async (event) => {
-      const target = event.target.closest("[data-kai-action], [data-kai-open-block]");
+      const target = event.target.closest("[data-kai-action], [data-kai-open-block], [data-kai-target-source]");
       if (!target) return;
       event.preventDefault();
 
       const action = target.getAttribute("data-kai-action");
       const blockId = target.getAttribute("data-kai-open-block");
+      const targetSource = target.getAttribute("data-kai-target-source");
       try {
         if (blockId) {
           await this.openBlock(blockId);
-        } else if (action === "save-settings") {
-          await this.readAndSaveSettings(root);
-          this.setLog(root, "设置已保存");
+        } else if (targetSource) {
+          this.setTargetBlock(root, targetSource);
+        } else if (action === "open-settings") {
+          this.setting.open(this.name);
         } else if (action === "load-notebooks") {
           await this.loadNotebookOptions(root);
         } else if (action === "build-index") {
-          await this.readAndSaveSettings(root);
+          await this.readWorkbenchSettings(root);
           await this.buildIndex(root);
+        } else if (action === "refresh-index") {
+          await this.refreshWorkbench(root);
         } else if (action === "clear-index") {
           await this.clearIndex(root);
         } else if (action === "ask") {
           await this.ask(root);
+        } else if (action === "copy-answer") {
+          await this.copyAnswer(root);
         } else if (action === "save-answer-doc") {
           await this.saveAnswerAsDocument(root);
         } else if (action === "append-answer-doc") {
           await this.appendAnswerToCurrentDocument(root);
+        } else if (action === "draft-note") {
+          await this.draftNewNote(root);
+        } else if (action === "create-note") {
+          await this.createDraftNote(root);
+        } else if (action === "use-current-block") {
+          await this.useCurrentBlock(root);
+        } else if (action === "draft-update") {
+          await this.draftBlockUpdate(root);
+        } else if (action === "apply-update") {
+          await this.applyBlockUpdate(root);
         }
       } catch (error) {
         console.error("Knowledge AI action failed", error);
@@ -259,25 +429,40 @@ class SiyuanKnowledgeAI extends Plugin {
     });
   }
 
-  async readAndSaveSettings(root) {
+  async readWorkbenchSettings(root) {
+    if (!root) return;
     const next = Object.assign({}, this.config);
     for (const input of root.querySelectorAll("[data-kai-config]")) {
       const key = input.getAttribute("data-kai-config");
-      if (input.type === "checkbox") next[key] = input.checked;
-      else if (input.type === "number") next[key] = Number(input.value);
-      else next[key] = input.value;
+      next[key] = input.value;
     }
-    const apiKeyInput = root.querySelector("[data-kai-api-key]");
-    if (apiKeyInput) this.setApiKey(apiKeyInput.value);
     await this.saveConfig(next);
   }
 
+  async refreshWorkbench(root) {
+    if (!root) return;
+    await this.refreshIndexStatus(root);
+    this.renderAnswer(root, this.lastAnswer);
+    this.renderSources(root, this.lastSources);
+  }
+
+  refreshAllWorkbenches() {
+    for (const root of this.activeRoots) {
+      this.refreshWorkbench(root);
+    }
+  }
+
   setLog(root, text, isError) {
-    const log = root && root.querySelector("[data-kai-log]");
+    if (!root) return;
+    const log = root.querySelector("[data-kai-log]");
     if (!log) return;
     const line = `[${new Date().toLocaleTimeString()}] ${text}`;
-    log.textContent = `${line}\n${log.textContent || ""}`.slice(0, 8000);
+    log.textContent = `${line}\n${log.textContent || ""}`.slice(0, 10000);
     log.classList.toggle("kai-log-error", Boolean(isError));
+  }
+
+  broadcastLog(text, isError) {
+    for (const root of this.activeRoots) this.setLog(root, text, isError);
   }
 
   setIndexStatus(root, text) {
@@ -285,16 +470,26 @@ class SiyuanKnowledgeAI extends Plugin {
     if (element) element.textContent = text;
   }
 
+  setProgress(root, value, max) {
+    const progress = root && root.querySelector("[data-kai-progress]");
+    if (!progress) return;
+    progress.max = Math.max(1, Number(max || 1));
+    progress.value = Math.max(0, Number(value || 0));
+  }
+
   async refreshIndexStatus(root) {
     const manifest = await this.readManifest();
     if (!manifest) {
-      this.setIndexStatus(root, "未建立索引");
+      this.setIndexStatus(root, "未建立索引。其他设备同步完成后点刷新即可读取。");
+      this.setProgress(root, 0, 1);
       return;
     }
+    const shardCount = Array.isArray(manifest.shards) ? manifest.shards.length : 0;
     this.setIndexStatus(
       root,
-      `${manifest.chunkCount || 0} 个片段 / ${manifest.shards ? manifest.shards.length : 0} 个分片 / ${manifest.builtAt || ""}`,
+      `${manifest.chunkCount || 0} 个片段 / ${shardCount} 个分片 / ${manifest.embeddingModel || ""} / ${manifest.builtAt || ""}`,
     );
+    this.setProgress(root, manifest.chunkCount || shardCount || 1, manifest.chunkCount || shardCount || 1);
   }
 
   async loadNotebookOptions(root) {
@@ -302,12 +497,13 @@ class SiyuanKnowledgeAI extends Plugin {
     const select = root.querySelector('[data-kai-config="defaultNotebook"]');
     if (!select) return;
     const notebooks = (data && data.notebooks ? data.notebooks : []).filter((item) => !item.closed);
-    select.innerHTML = notebooks
-      .map((item) => {
+    select.innerHTML = [
+      `<option value="">未选择</option>`,
+      ...notebooks.map((item) => {
         const selected = item.id === this.config.defaultNotebook ? "selected" : "";
         return `<option value="${escapeHtml(item.id)}" ${selected}>${escapeHtml(item.name)} (${escapeHtml(item.id)})</option>`;
-      })
-      .join("");
+      }),
+    ].join("");
     this.setLog(root, `已读取 ${notebooks.length} 个笔记本`);
   }
 
@@ -326,6 +522,7 @@ class SiyuanKnowledgeAI extends Plugin {
       body: JSON.stringify({ path }),
     });
     if (response.status === 202 || response.status === 404) return fallback;
+    if (!response.ok) return fallback;
     const text = await response.text();
     if (!text) return fallback;
     try {
@@ -336,6 +533,26 @@ class SiyuanKnowledgeAI extends Plugin {
       console.warn("Knowledge AI: failed to parse json file", path, error);
       return fallback;
     }
+  }
+
+  async putDirectory(path) {
+    const form = new FormData();
+    form.append("path", path);
+    form.append("isDir", "true");
+    const response = await fetch("/api/file/putFile", {
+      method: "POST",
+      body: form,
+    });
+    const data = await response.json();
+    if (data && data.code !== 0 && data.code !== 409) {
+      console.warn("Knowledge AI: put directory failed", path, data.msg || data);
+    }
+  }
+
+  async ensureIndexDirs() {
+    await this.putDirectory(`/data/storage/petal/${PLUGIN_NAME}`);
+    await this.putDirectory(INDEX_ROOT);
+    await this.putDirectory(`${INDEX_ROOT}/shards`);
   }
 
   async putJsonFile(path, value) {
@@ -360,7 +577,7 @@ class SiyuanKnowledgeAI extends Plugin {
       body: JSON.stringify({ path }),
     });
     const data = await response.json();
-    if (data && data.code !== 0) throw new Error(data.msg || `删除 ${path} 失败`);
+    if (data && data.code !== 0 && data.code !== 404) throw new Error(data.msg || `删除 ${path} 失败`);
   }
 
   async readManifest() {
@@ -369,9 +586,8 @@ class SiyuanKnowledgeAI extends Plugin {
 
   async buildIndex(root, options) {
     const silent = options && options.silent;
-    const apiKey = this.getApiKey();
-    if (!apiKey) {
-      if (!silent) throw new Error("请先填写 API Key");
+    if (this.indexing) {
+      if (!silent) this.setLog(root, "索引正在更新，请等待当前任务结束");
       return;
     }
     if (!this.config.embeddingModel) {
@@ -379,39 +595,48 @@ class SiyuanKnowledgeAI extends Plugin {
       return;
     }
 
-    this.setLog(root, "开始读取思源块索引");
-    const limit = clampNumber(this.config.maxIndexedBlocks, 100, 100000, DEFAULT_CONFIG.maxIndexedBlocks);
-    const sql = [
-      "SELECT id, root_id, parent_id, box, path, hpath, type, subtype, content, updated",
-      "FROM blocks",
-      "WHERE content IS NOT NULL AND content != ''",
-      "AND type IN ('d','h','p','l','i','c','b','m','t')",
-      "ORDER BY updated DESC",
-      `LIMIT ${limit}`,
-    ].join(" ");
-    const rows = (await this.siyuanPost("/api/query/sql", { stmt: sql })) || [];
-    const chunks = [];
-    for (const row of rows) chunks.push(...blockToChunks(row, this.config));
-    if (!chunks.length) throw new Error("没有可索引的块内容");
+    this.indexing = true;
+    try {
+      this.setProgress(root, 0, 1);
+      this.setLog(root, "开始读取思源全库块索引");
+      const limit = clampNumber(this.config.maxIndexedBlocks, 100, 100000, DEFAULT_CONFIG.maxIndexedBlocks);
+      const sql = [
+        "SELECT id, root_id, parent_id, box, path, hpath, type, subtype, content, markdown, updated",
+        "FROM blocks",
+        "WHERE content IS NOT NULL AND content != ''",
+        "AND type IN ('d','h','p','l','i','c','b','m','t','s')",
+        "ORDER BY updated DESC",
+        `LIMIT ${limit}`,
+      ].join(" ");
+      const rows = (await this.siyuanPost("/api/query/sql", { stmt: sql })) || [];
+      const chunks = [];
+      for (const row of rows) chunks.push(...blockToChunks(row, this.config));
+      if (!chunks.length) throw new Error("没有可索引的块内容");
 
-    this.setLog(root, `准备向量化 ${chunks.length} 个片段`);
-    const batchSize = clampNumber(this.config.batchSize, 1, 128, DEFAULT_CONFIG.batchSize);
-    for (let start = 0; start < chunks.length; start += batchSize) {
-      const batch = chunks.slice(start, start + batchSize);
-      const embeddings = await this.embedTexts(batch.map((item) => item.text));
-      embeddings.forEach((embedding, index) => {
-        batch[index].embedding = embedding;
-      });
-      this.setLog(root, `向量化 ${Math.min(start + batch.length, chunks.length)} / ${chunks.length}`);
-      await new Promise((resolve) => window.setTimeout(resolve, 0));
+      this.setLog(root, `准备向量化 ${chunks.length} 个片段`);
+      const batchSize = clampNumber(this.config.batchSize, 1, 128, DEFAULT_CONFIG.batchSize);
+      for (let start = 0; start < chunks.length; start += batchSize) {
+        const batch = chunks.slice(start, start + batchSize);
+        const embeddings = await this.embedTexts(batch.map((item) => item.text));
+        embeddings.forEach((embedding, index) => {
+          batch[index].embedding = embedding;
+        });
+        const done = Math.min(start + batch.length, chunks.length);
+        this.setProgress(root, done, chunks.length);
+        this.setLog(root, `向量化 ${done} / ${chunks.length}`);
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
+      }
+
+      await this.writeIndex(root, rows, chunks);
+      await this.refreshIndexStatus(root);
+      if (!silent) showMessage("Knowledge AI：索引已更新");
+    } finally {
+      this.indexing = false;
     }
-
-    await this.writeIndex(root, rows, chunks);
-    await this.refreshIndexStatus(root);
-    if (!silent) showMessage("Knowledge AI：索引已更新");
   }
 
   async writeIndex(root, rows, chunks) {
+    await this.ensureIndexDirs();
     const oldManifest = await this.readManifest();
     if (oldManifest && Array.isArray(oldManifest.shards)) {
       for (const shard of oldManifest.shards) {
@@ -437,7 +662,7 @@ class SiyuanKnowledgeAI extends Plugin {
         chunks: shardChunks,
       });
       shards.push({ id: shardId, path, count: shardChunks.length });
-      this.setLog(root, `写入分片 ${shards.length}`);
+      this.setLog(root, `写入同步分片 ${shards.length}`);
     }
 
     const manifest = {
@@ -462,7 +687,7 @@ class SiyuanKnowledgeAI extends Plugin {
       this.setLog(root, "没有可清空的索引");
       return;
     }
-    if (!window.confirm("清空 Knowledge AI 的索引分片？不会删除你的笔记。")) return;
+    if (!window.confirm("清空 Knowledge AI 的同步索引分片？不会删除你的笔记。")) return;
     for (const shard of manifest.shards || []) {
       if (shard.path) {
         try {
@@ -480,31 +705,33 @@ class SiyuanKnowledgeAI extends Plugin {
   async loadIndexedChunks() {
     const manifest = await this.readManifest();
     if (!manifest || !Array.isArray(manifest.shards) || !manifest.shards.length) {
-      throw new Error("索引不存在，请先更新索引");
+      throw new Error("索引不存在，请先在任意设备更新索引并等待思源同步");
+    }
+    if (manifest.version !== CURRENT_INDEX_VERSION) {
+      throw new Error("索引版本不兼容，请重新更新索引");
     }
     if (manifest.embeddingModel !== this.config.embeddingModel) {
-      throw new Error(`当前 Embedding 模型为 ${this.config.embeddingModel}，索引使用 ${manifest.embeddingModel}，请重新更新索引`);
+      throw new Error(`当前 Embedding 模型为 ${this.config.embeddingModel}，索引使用 ${manifest.embeddingModel}，请切回该模型或重新更新索引`);
     }
     const chunks = [];
     for (const shard of manifest.shards) {
       const data = await this.readJsonFile(shard.path, null);
       if (data && Array.isArray(data.chunks)) chunks.push(...data.chunks);
     }
-    if (!chunks.length) throw new Error("索引分片为空，请重新更新索引");
+    if (!chunks.length) throw new Error("索引分片为空，请等待同步完成或重新更新索引");
     return chunks;
   }
 
   async ask(root) {
-    await this.readAndSaveSettings(root);
+    await this.readWorkbenchSettings(root);
     const question = root.querySelector("[data-kai-question]").value.trim();
     if (!question) throw new Error("请输入问题");
-    const apiKey = this.getApiKey();
-    if (!apiKey) throw new Error("请先填写 API Key");
 
-    this.setLog(root, "检索相关笔记");
+    this.setLog(root, "读取同步索引并检索相关笔记");
     const chunks = await this.loadIndexedChunks();
     const queryEmbedding = (await this.embedTexts([question]))[0];
     const ranked = rankChunks(chunks, queryEmbedding, this.config.topK);
+    this.lastQuestion = question;
     this.lastSources = ranked;
     this.renderSources(root, ranked);
 
@@ -516,55 +743,52 @@ class SiyuanKnowledgeAI extends Plugin {
     this.setLog(root, "回答完成");
   }
 
+  async modelPost(endpoint, payload, label) {
+    const url = `${normalizeBaseUrl(this.config.baseUrl)}/${String(endpoint || "").replace(/^\/+/, "")}`;
+    const proxyPayload = buildModelProxyPayload(url, this.getApiKey(), payload, this.config.modelTimeoutMs);
+    const data = await this.siyuanPost("/api/network/forwardProxy", proxyPayload);
+    return parseModelProxyJson(data, label);
+  }
+
   async embedTexts(texts) {
-    const response = await fetch(`${normalizeBaseUrl(this.config.baseUrl)}/embeddings`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.getApiKey()}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    const data = await this.modelPost(
+      "embeddings",
+      {
         model: this.config.embeddingModel,
         input: texts,
-      }),
-    });
-    if (!response.ok) throw new Error(`Embedding API ${response.status}: ${await response.text()}`);
-    const data = await response.json();
-    if (!Array.isArray(data.data)) throw new Error("Embedding API 返回格式不正确");
-    return data.data
-      .slice()
-      .sort((a, b) => Number(a.index || 0) - Number(b.index || 0))
-      .map((item) => item.embedding);
+      },
+      "Embedding",
+    );
+    const embeddings = extractEmbeddings(data);
+    if (embeddings.length !== texts.length) throw new Error("Embedding API 返回数量和请求数量不一致");
+    return embeddings;
   }
 
   async chat(messages) {
-    const response = await fetch(`${normalizeBaseUrl(this.config.baseUrl)}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.getApiKey()}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    const data = await this.modelPost(
+      "chat/completions",
+      {
         model: this.config.chatModel,
         messages,
         temperature: this.config.temperature,
-      }),
-    });
-    if (!response.ok) throw new Error(`Chat API ${response.status}: ${await response.text()}`);
-    const data = await response.json();
-    const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-    if (!content) throw new Error("Chat API 没有返回回答内容");
-    return content;
+      },
+      "Chat",
+    );
+    return extractChatContent(data);
   }
 
   renderAnswer(root, answer) {
-    const element = root.querySelector("[data-kai-answer]");
+    const element = root && root.querySelector("[data-kai-answer]");
     if (!element) return;
+    if (!answer) {
+      element.innerHTML = `<div class="kai-empty">回答会显示在这里。</div>`;
+      return;
+    }
     element.innerHTML = `<pre>${escapeHtml(answer)}</pre>`;
   }
 
   renderSources(root, ranked) {
-    const element = root.querySelector("[data-kai-sources]");
+    const element = root && root.querySelector("[data-kai-sources]");
     if (!element) return;
     if (!ranked || !ranked.length) {
       element.innerHTML = "";
@@ -576,11 +800,15 @@ class SiyuanKnowledgeAI extends Plugin {
         const title = chunk.hpath || chunk.title || chunk.blockId;
         return `
           <div class="kai-source">
-            <button class="b3-button b3-button--outline" data-kai-open-block="${escapeHtml(chunk.blockId)}">[${index + 1}]</button>
-            <div>
+            <div class="kai-source-index">[${index + 1}]</div>
+            <div class="kai-source-body">
               <div class="kai-source-title">${escapeHtml(title)}</div>
               <div class="kai-muted">${escapeHtml(chunk.blockId)} · ${item.score.toFixed(3)}</div>
-              <div class="kai-source-text">${escapeHtml(chunk.text.slice(0, 240))}</div>
+              <div class="kai-source-text">${escapeHtml(chunk.text.slice(0, 320))}</div>
+              <div class="kai-actions">
+                <button class="b3-button b3-button--outline" data-kai-open-block="${escapeHtml(chunk.blockId)}">打开引用</button>
+                <button class="b3-button b3-button--outline" data-kai-target-source="${escapeHtml(chunk.blockId)}">作为修改目标</button>
+              </div>
             </div>
           </div>
         `;
@@ -589,34 +817,49 @@ class SiyuanKnowledgeAI extends Plugin {
   }
 
   async openBlock(blockId) {
-    const id = escapeSql(blockId);
-    const rows = await this.siyuanPost("/api/query/sql", {
-      stmt: `SELECT id, root_id, type FROM blocks WHERE id='${id}' LIMIT 1`,
-    });
-    const row = rows && rows[0];
-    const docId = row && row.type === "d" ? row.id : row && row.root_id ? row.root_id : blockId;
-    await openTab({
-      app: this.app,
-      doc: {
-        id: docId,
-        action: ["cb-get-focus", "cb-get-hl"],
-      },
-      keepCursor: false,
-      removeCurrentTab: false,
-      openNewTab: true,
-    });
+    try {
+      await openTab({
+        app: this.app,
+        doc: {
+          id: blockId,
+          action: ["cb-get-focus", "cb-get-hl"],
+        },
+        keepCursor: false,
+        removeCurrentTab: false,
+      });
+    } catch (error) {
+      const rows = await this.siyuanPost("/api/query/sql", {
+        stmt: `SELECT id, root_id, type FROM blocks WHERE id='${escapeSql(blockId)}' LIMIT 1`,
+      });
+      const row = rows && rows[0];
+      const docId = row && row.type === "d" ? row.id : row && row.root_id ? row.root_id : blockId;
+      await openTab({
+        app: this.app,
+        doc: {
+          id: docId,
+          action: ["cb-get-focus", "cb-get-hl"],
+        },
+        keepCursor: false,
+        removeCurrentTab: false,
+      });
+    }
+  }
+
+  async copyAnswer(root) {
+    if (!this.lastAnswer) throw new Error("没有可复制的回答");
+    await navigator.clipboard.writeText(this.lastAnswer);
+    this.setLog(root, "回答已复制");
+  }
+
+  ensureWriteAllowed() {
+    if (!this.config.allowWriteActions) throw new Error("插件设置中已关闭写入笔记能力");
   }
 
   async saveAnswerAsDocument(root) {
+    this.ensureWriteAllowed();
     if (!this.lastAnswer) throw new Error("没有可保存的回答");
-    await this.readAndSaveSettings(root);
-    let notebook = this.config.defaultNotebook;
-    if (!notebook) {
-      const data = await this.siyuanPost("/api/notebook/lsNotebooks", {});
-      const first = (data.notebooks || []).find((item) => !item.closed);
-      notebook = first && first.id;
-    }
-    if (!notebook) throw new Error("请先选择默认笔记本");
+    await this.readWorkbenchSettings(root);
+    const notebook = await this.resolveNotebook();
     const title = window.prompt("文档标题", `AI 回答 ${new Date().toLocaleString()}`);
     if (!title) return;
     const directory = normalizeDocPath(this.config.defaultPath || "/Knowledge AI");
@@ -633,8 +876,9 @@ class SiyuanKnowledgeAI extends Plugin {
   }
 
   async appendAnswerToCurrentDocument(root) {
+    this.ensureWriteAllowed();
     if (!this.lastAnswer) throw new Error("没有可追加的回答");
-    const docId = await this.getCurrentDocId();
+    const docId = await this.getCurrentBlockId();
     if (!docId) throw new Error("没有找到当前文档");
     const markdown = `\n\n${this.formatAnswerMarkdown("AI 回答")}`;
     if (!window.confirm(`追加回答到当前文档：${docId}`)) return;
@@ -647,29 +891,141 @@ class SiyuanKnowledgeAI extends Plugin {
     showMessage("Knowledge AI：已追加到当前文档");
   }
 
-  async getCurrentDocId() {
-    if (typeof siyuan.getActiveEditor === "function") {
-      const editor = siyuan.getActiveEditor(false);
+  async draftNewNote(root) {
+    const title = root.querySelector("[data-kai-new-note-title]").value.trim() || "AI 笔记";
+    const prompt = root.querySelector("[data-kai-new-note-prompt]").value.trim();
+    if (!prompt && !this.lastAnswer) throw new Error("请输入新笔记要求，或先完成一次问答");
+    const messages = [
+      {
+        role: "system",
+        content: "你是思源笔记写作助手。请生成可以直接写入思源的 Markdown 正文，只输出正文，不要包裹代码块。",
+      },
+      {
+        role: "user",
+        content: [
+          `标题：${title}`,
+          "",
+          "用户要求：",
+          prompt || "根据上一轮问答整理成结构化笔记。",
+          "",
+          "上一轮问题：",
+          this.lastQuestion || "无",
+          "",
+          "上一轮回答：",
+          this.lastAnswer || "无",
+        ].join("\n"),
+      },
+    ];
+    this.setLog(root, "生成新笔记草稿");
+    const draft = await this.chat(messages);
+    this.noteDraft = draft;
+    root.querySelector("[data-kai-new-note-draft]").value = draft;
+    this.setLog(root, "新笔记草稿已生成，请确认后创建");
+  }
+
+  async createDraftNote(root) {
+    this.ensureWriteAllowed();
+    await this.readWorkbenchSettings(root);
+    const notebook = await this.resolveNotebook();
+    const title = root.querySelector("[data-kai-new-note-title]").value.trim() || "AI 笔记";
+    const directory = normalizeDocPath(root.querySelector("[data-kai-new-note-path]").value || this.config.defaultPath);
+    const draft = root.querySelector("[data-kai-new-note-draft]").value.trim();
+    if (!draft) throw new Error("没有可创建的新笔记草稿");
+    const path = `${directory}/${safePathSegment(title)}`;
+    if (!window.confirm(`创建新文档：${path}`)) return;
+    const id = await this.siyuanPost("/api/filetree/createDocWithMd", {
+      notebook,
+      path,
+      markdown: `# ${title}\n\n${draft}`,
+    });
+    this.setLog(root, `已创建新笔记 ${id || path}`);
+    showMessage("Knowledge AI：新笔记已创建");
+  }
+
+  setTargetBlock(root, blockId) {
+    const input = root.querySelector("[data-kai-target-block]");
+    if (input) input.value = blockId;
+    this.setLog(root, `修改目标已设置为 ${blockId}`);
+  }
+
+  async useCurrentBlock(root) {
+    const blockId = await this.getCurrentBlockId();
+    if (!blockId) throw new Error("没有找到当前块");
+    this.setTargetBlock(root, blockId);
+  }
+
+  async draftBlockUpdate(root) {
+    const input = root.querySelector("[data-kai-target-block]");
+    const blockId = (input && input.value.trim()) || (await this.getCurrentBlockId());
+    if (!blockId) throw new Error("请输入目标块 ID，或先打开一个文档");
+    const instruction = root.querySelector("[data-kai-update-instruction]").value.trim();
+    if (!instruction) throw new Error("请输入修改要求");
+    const data = await this.siyuanPost("/api/block/getBlockKramdown", { id: blockId });
+    const original = data && data.kramdown ? data.kramdown : "";
+    if (!original) throw new Error("没有读取到目标块内容");
+    const messages = [
+      {
+        role: "system",
+        content: "你是思源笔记改写助手。根据用户要求修改给定块内容。只输出修改后的 Markdown/Kramdown，不要解释，不要包裹代码块。",
+      },
+      {
+        role: "user",
+        content: [
+          "修改要求：",
+          instruction,
+          "",
+          "原始块内容：",
+          original,
+        ].join("\n"),
+      },
+    ];
+    this.setLog(root, `生成块 ${blockId} 的修改草稿`);
+    const draft = await this.chat(messages);
+    this.updateDraft = { blockId, original, draft };
+    root.querySelector("[data-kai-update-draft]").value = draft;
+    this.setLog(root, "修改草稿已生成，请确认后覆盖");
+  }
+
+  async applyBlockUpdate(root) {
+    this.ensureWriteAllowed();
+    const blockId = root.querySelector("[data-kai-target-block]").value.trim() || (this.updateDraft && this.updateDraft.blockId);
+    const draft = root.querySelector("[data-kai-update-draft]").value.trim();
+    if (!blockId) throw new Error("没有目标块 ID");
+    if (!draft) throw new Error("没有可应用的修改草稿");
+    if (!window.confirm(`确认覆盖块 ${blockId}？此操作会修改思源笔记内容。`)) return;
+    await this.siyuanPost("/api/block/updateBlock", {
+      id: blockId,
+      dataType: "markdown",
+      data: draft,
+    });
+    this.setLog(root, `已覆盖块 ${blockId}`);
+    showMessage("Knowledge AI：目标块已更新");
+  }
+
+  async resolveNotebook() {
+    if (this.config.defaultNotebook) return this.config.defaultNotebook;
+    const data = await this.siyuanPost("/api/notebook/lsNotebooks", {});
+    const first = (data.notebooks || []).find((item) => !item.closed);
+    if (!first) throw new Error("请先选择默认笔记本");
+    return first.id;
+  }
+
+  async getCurrentBlockId() {
+    if (typeof getActiveEditor === "function") {
+      const editor = getActiveEditor(false);
       const blockId =
         editor &&
         editor.protyle &&
         editor.protyle.block &&
         (editor.protyle.block.id || editor.protyle.block.parentID);
-      if (blockId) return this.resolveRootDocument(blockId);
+      if (blockId) return blockId;
     }
+    const selected = document.querySelector(".layout__wnd--active .protyle-wysiwyg--select[data-node-id]");
+    const selectedId = selected && selected.getAttribute("data-node-id");
+    if (selectedId) return selectedId;
     const activeTitle = document.querySelector(".layout__wnd--active .protyle-title[data-node-id]");
     const domId = activeTitle && activeTitle.getAttribute("data-node-id");
-    if (domId) return this.resolveRootDocument(domId);
-    return "";
-  }
-
-  async resolveRootDocument(blockId) {
-    const rows = await this.siyuanPost("/api/query/sql", {
-      stmt: `SELECT id, root_id, type FROM blocks WHERE id='${escapeSql(blockId)}' LIMIT 1`,
-    });
-    const row = rows && rows[0];
-    if (!row) return blockId;
-    return row.type === "d" ? row.id : row.root_id || blockId;
+    return domId || "";
   }
 
   formatAnswerMarkdown(title) {
