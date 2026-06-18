@@ -351,6 +351,16 @@
   max-width: 420px;
 }
 
+.kai-pill {
+  justify-self: start;
+  padding: 3px 9px;
+  border: 1px solid var(--b3-theme-primary);
+  border-radius: 6px;
+  color: var(--b3-theme-primary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .kai-setting-textarea {
   width: 100%;
   min-height: 110px;

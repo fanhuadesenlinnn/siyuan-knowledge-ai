@@ -3,8 +3,11 @@
 const siyuan = require("siyuan");
 const {
   DEFAULT_CONFIG,
+  INDEX_SCHEMA_VERSION,
+  PROXY_MODE_OPTIONS,
   PROVIDER_PRESETS,
-  blockToChunks,
+  buildGatewayProxyPayload,
+  buildKnowledgeUnits,
   buildMessages,
   buildModelProxyPayload,
   buildModelRequestHeaders,
@@ -14,12 +17,17 @@ const {
   escapeSql,
   extractChatContent,
   extractEmbeddings,
-  isLocalModelBaseUrl,
+  getIndexManifestError,
+  getModelRequestRoutes,
+  isFallbackAllowed,
   makeManifestPath,
   makeShardPath,
+  markModelRouteError,
   mergeConfig,
+  modelRouteLabel,
   normalizeBaseUrl,
   normalizeModelBaseUrlForRequest,
+  normalizeProxyMode,
   nowIso,
   parseModelProxyJson,
   rankChunks,
@@ -40,7 +48,7 @@ const PLUGIN_NAME = "siyuan-knowledge-ai";
 const CONFIG_FILE = "config.json";
 const API_KEY_STORAGE = `${PLUGIN_NAME}:api-key`;
 const DOCK_TYPE = "knowledge-ai-dock";
-const CURRENT_INDEX_VERSION = 1;
+const CURRENT_INDEX_VERSION = INDEX_SCHEMA_VERSION;
 const INDEX_ROOT = `/data/storage/petal/${PLUGIN_NAME}/index`;
 
 class SiyuanKnowledgeAI extends Plugin {
@@ -166,6 +174,9 @@ class SiyuanKnowledgeAI extends Plugin {
             ${this.renderSettingField("embeddingModel", "Embedding 模型", "用于全库索引和提问检索；换模型后需要重建索引。")}
             ${this.renderSettingField("temperature", "温度", "回答和草稿生成的随机性。", { number: true, step: "0.1", min: "0", max: "2" })}
             ${this.renderSettingField("modelTimeoutMs", "模型超时毫秒", "通过思源代理调用模型接口的超时时间。", { number: true, min: "1000" })}
+            ${this.renderSettingField("proxyMode", "AI 请求代理", "仅影响聊天和 Embedding 请求；本地模型自动绕过代理。", { select: PROXY_MODE_OPTIONS })}
+            ${this.renderSettingField("proxyGatewayUrl", "转发网关 URL", "gateway 模式使用。网关接收与思源 forwardProxy 相同的 JSON payload。", { rowAttrs: "data-kai-proxy-gateway-row" })}
+            ${this.renderSettingField("proxyFallback", "允许代理回退", "系统代理优先模式下，网络/CORS/超时失败时回退到思源转发。", { checkbox: true })}
             ${this.renderSettingField("systemPrompt", "系统提示词", "问答时使用的系统提示词。", { textarea: true })}
             <div class="kai-setting-row">
               <span class="kai-setting-copy">
@@ -183,10 +194,10 @@ class SiyuanKnowledgeAI extends Plugin {
           <section class="kai-settings-page" data-kai-page="retrieval">
             ${this.renderSettingField("topK", "引用数量", "每次问答最多送入模型的笔记片段数。", { number: true, min: "1", max: "30" })}
             ${this.renderSettingField("maxIndexedBlocks", "索引块上限", "手动更新索引时最多读取多少个思源块。", { number: true, min: "100" })}
-            ${this.renderSettingField("chunkSize", "片段长度", "单个索引片段的最大字符数。", { number: true, min: "200" })}
-            ${this.renderSettingField("chunkOverlap", "片段重叠", "相邻片段保留的重叠字符数。", { number: true, min: "0" })}
-            ${this.renderSettingField("batchSize", "向量批量", "每次 Embedding 请求包含的片段数。", { number: true, min: "1", max: "128" })}
-            ${this.renderSettingField("shardSize", "分片大小", "每个同步索引分片保存的片段数。", { number: true, min: "20", max: "500" })}
+            ${this.renderSettingField("chunkSize", "知识单元长度", "块 fallback 与章节上下文的基础字符长度。", { number: true, min: "200" })}
+            ${this.renderSettingField("chunkOverlap", "长块重叠", "长块切分时相邻块单元保留的重叠字符数。", { number: true, min: "0" })}
+            ${this.renderSettingField("batchSize", "向量批量", "每次 Embedding 请求包含的知识单元数。", { number: true, min: "1", max: "128" })}
+            ${this.renderSettingField("shardSize", "分片大小", "每个同步索引分片保存的知识单元数。", { number: true, min: "20", max: "500" })}
           </section>
 
           <section class="kai-settings-page" data-kai-page="write">
@@ -198,10 +209,18 @@ class SiyuanKnowledgeAI extends Plugin {
           <section class="kai-settings-page" data-kai-page="index">
             ${this.renderSettingField("autoIndexOnStart", "启动后定期更新", "启用后按下方间隔自动重建索引。", { checkbox: true })}
             ${this.renderSettingField("autoIndexEveryHours", "自动索引间隔小时", "仅在启用定期更新时生效。", { number: true, min: "1" })}
+            <div class="kai-setting-row kai-setting-row-check">
+              <span class="kai-setting-copy">
+                <span class="kai-setting-title">结构化索引</span>
+                <span class="kai-setting-desc">固定开启：块、章节、文档、笔记本、全库多层知识单元。</span>
+              </span>
+              <span class="kai-pill">已开启</span>
+            </div>
+            ${this.renderSettingField("enableAiSummaries", "AI 主题摘要", "关闭时只用标题、标签、路径和正文；开启后更新索引会生成章节/文档/全库摘要。", { checkbox: true })}
             <div class="kai-setting-row">
               <span class="kai-setting-copy">
                 <span class="kai-setting-title">索引管理</span>
-                <span class="kai-setting-desc">全库向量索引，索引分片随思源同步。其他设备同步完成后读取即可。</span>
+                <span class="kai-setting-desc">v2 多层向量索引，索引分片随思源同步。其他设备同步完成后读取即可。</span>
               </span>
             </div>
             <div class="kai-status" data-kai-index-status>读取中...</div>
@@ -251,6 +270,14 @@ class SiyuanKnowledgeAI extends Plugin {
     let control = "";
     if (settingOptions.checkbox) {
       control = `<input class="b3-switch fn__flex-shrink" type="checkbox" ${common} ${value ? "checked" : ""}>`;
+    } else if (settingOptions.select) {
+      const optionsHtml = settingOptions.select
+        .map((item) => {
+          const selected = item.id === value ? "selected" : "";
+          return `<option value="${escapeHtml(item.id)}" ${selected}>${escapeHtml(item.label)}</option>`;
+        })
+        .join("");
+      control = `<select class="b3-select kai-setting-input" ${common}>${optionsHtml}</select>`;
     } else if (settingOptions.textarea) {
       control = `<textarea class="b3-text-field kai-setting-textarea" ${common}>${escapeHtml(value == null ? "" : value)}</textarea>`;
     } else {
@@ -265,8 +292,9 @@ class SiyuanKnowledgeAI extends Plugin {
         .join(" ");
       control = `<input class="b3-text-field kai-setting-input" ${attrs} ${common} value="${escapeHtml(value == null ? "" : value)}">`;
     }
+    const rowAttrs = settingOptions.rowAttrs ? ` ${settingOptions.rowAttrs}` : "";
     return `
-      <label class="kai-setting-row ${settingOptions.checkbox ? "kai-setting-row-check" : ""}">
+      <label class="kai-setting-row ${settingOptions.checkbox ? "kai-setting-row-check" : ""}"${rowAttrs}>
         <span class="kai-setting-copy">
           <span class="kai-setting-title">${escapeHtml(title)}</span>
           <span class="kai-setting-desc">${escapeHtml(description)}</span>
@@ -338,6 +366,15 @@ class SiyuanKnowledgeAI extends Plugin {
         setField("embeddingModel", preset.embeddingModel);
       });
     }
+    const proxyModeSelect = root.querySelector('[data-kai-setting-key="proxyMode"]');
+    const refreshProxyGatewayVisibility = () => {
+      const row = root.querySelector("[data-kai-proxy-gateway-row]");
+      if (row) row.hidden = !proxyModeSelect || proxyModeSelect.value !== "gateway";
+    };
+    if (proxyModeSelect) {
+      proxyModeSelect.addEventListener("change", refreshProxyGatewayVisibility);
+      refreshProxyGatewayVisibility();
+    }
   }
 
   async saveSettingsFromDialog(root) {
@@ -401,6 +438,12 @@ class SiyuanKnowledgeAI extends Plugin {
     merged.batchSize = clampNumber(merged.batchSize, 1, 128, DEFAULT_CONFIG.batchSize);
     merged.shardSize = clampNumber(merged.shardSize, 20, 500, DEFAULT_CONFIG.shardSize);
     merged.modelTimeoutMs = clampNumber(merged.modelTimeoutMs, 1000, 10 * 60 * 1000, DEFAULT_CONFIG.modelTimeoutMs);
+    merged.aiSummaryMaxUnits = clampNumber(
+      merged.aiSummaryMaxUnits,
+      1,
+      1000,
+      DEFAULT_CONFIG.aiSummaryMaxUnits,
+    );
     merged.autoIndexEveryHours = clampNumber(
       merged.autoIndexEveryHours,
       1,
@@ -408,8 +451,12 @@ class SiyuanKnowledgeAI extends Plugin {
       DEFAULT_CONFIG.autoIndexEveryHours,
     );
     merged.baseUrl = normalizeModelBaseUrlForRequest(merged.baseUrl);
+    merged.proxyMode = normalizeProxyMode(merged.proxyMode);
+    merged.proxyGatewayUrl = String(merged.proxyGatewayUrl || "").trim().replace(/\/+$/, "");
     merged.allowWriteActions = Boolean(merged.allowWriteActions);
     merged.autoIndexOnStart = Boolean(merged.autoIndexOnStart);
+    merged.enableAiSummaries = Boolean(merged.enableAiSummaries);
+    merged.proxyFallback = Boolean(merged.proxyFallback);
     return merged;
   }
 
@@ -551,7 +598,7 @@ class SiyuanKnowledgeAI extends Plugin {
       try {
         const chunks = await this.loadIndexedChunks();
         const queryEmbedding = (await this.embedTexts([question]))[0];
-        ranked = rankChunks(chunks, queryEmbedding, this.config.topK);
+        ranked = rankChunks(chunks, queryEmbedding, this.config.topK, question);
       } catch (error) {
         // 索引不可用时降级为纯聊天，不阻断对话
         console.warn("Knowledge AI: retrieval skipped", error);
@@ -643,16 +690,24 @@ class SiyuanKnowledgeAI extends Plugin {
           .map((item, index) => {
             const chunk = item.chunk;
             const title = chunk.hpath || chunk.title || chunk.blockId;
+            const typeLabel = this.sourceTypeLabel(chunk);
+            const blockId = chunk.blockId || "";
+            const openButton = blockId
+              ? `<button class="b3-button b3-button--outline" data-kai-open-block="${escapeHtml(blockId)}">打开引用</button>`
+              : "";
+            const updateButton = blockId && (!chunk.type || chunk.type === "block")
+              ? `<button class="b3-button b3-button--outline" data-kai-target-source="${escapeHtml(blockId)}">改写此引用</button>`
+              : "";
             return `
               <div class="kai-source">
                 <div class="kai-source-index">[${index + 1}]</div>
                 <div class="kai-source-body">
-                  <div class="kai-source-title">${escapeHtml(title)}</div>
-                  <div class="kai-muted">${escapeHtml(chunk.blockId)} · ${item.score.toFixed(3)}</div>
-                  <div class="kai-source-text">${escapeHtml(chunk.text.slice(0, 320))}</div>
+                  <div class="kai-source-title">${escapeHtml(typeLabel)} · ${escapeHtml(title)}</div>
+                  <div class="kai-muted">${escapeHtml(blockId || chunk.id || "")} · ${item.score.toFixed(3)}</div>
+                  <div class="kai-source-text">${escapeHtml((chunk.summary || chunk.text || chunk.contextText || "").slice(0, 320))}</div>
                   <div class="kai-actions">
-                    <button class="b3-button b3-button--outline" data-kai-open-block="${escapeHtml(chunk.blockId)}">打开引用</button>
-                    <button class="b3-button b3-button--outline" data-kai-target-source="${escapeHtml(chunk.blockId)}">改写此引用</button>
+                    ${openButton}
+                    ${updateButton}
                   </div>
                 </div>
               </div>
@@ -665,6 +720,18 @@ class SiyuanKnowledgeAI extends Plugin {
       sources.classList.toggle("kai-sources-open");
     });
     return sources;
+  }
+
+  sourceTypeLabel(source) {
+    return (
+      {
+        block: "块",
+        section: "章节",
+        document: "文档",
+        notebook: "笔记本",
+        vault: "全库",
+      }[source && source.type] || "片段"
+    );
   }
 
   openMessageMenu(root, index, anchor) {
@@ -764,7 +831,7 @@ class SiyuanKnowledgeAI extends Plugin {
       ],
       draft,
     );
-    this.setModelStatus(root, `聊天测试通过：${answer.slice(0, 120)}`);
+    this.setModelStatus(root, `聊天测试通过（${this.formatLastModelRoute()}）：${answer.slice(0, 120)}`);
     showMessage("Knowledge AI：聊天测试通过");
   }
 
@@ -773,7 +840,7 @@ class SiyuanKnowledgeAI extends Plugin {
     this.setModelStatus(root, "正在测试 Embedding 模型...");
     const embeddings = await this.embedTexts(["Knowledge AI embedding connection test"], draft);
     const dimension = embeddings[0] && embeddings[0].length ? embeddings[0].length : 0;
-    this.setModelStatus(root, `向量测试通过：维度 ${dimension}`);
+    this.setModelStatus(root, `向量测试通过（${this.formatLastModelRoute()}）：维度 ${dimension}`);
     showMessage("Knowledge AI：向量测试通过");
   }
 
@@ -785,11 +852,15 @@ class SiyuanKnowledgeAI extends Plugin {
       return;
     }
     const shardCount = Array.isArray(manifest.shards) ? manifest.shards.length : 0;
+    const counts = manifest.unitCounts || {};
+    const unitText = manifest.schemaVersion === 2
+      ? `${manifest.unitCount || 0} 单元（块 ${counts.block || 0} / 章节 ${counts.section || 0} / 文档 ${counts.document || 0} / 笔记本 ${counts.notebook || 0} / 全库 ${counts.vault || 0}）`
+      : `${manifest.chunkCount || 0} 片段`;
     this.setIndexStatus(
       root,
-      `${manifest.chunkCount || 0} 片段 / ${shardCount} 分片 / ${manifest.embeddingModel || ""}`,
+      `${unitText} / ${shardCount} 分片 / ${manifest.embeddingModel || ""}`,
     );
-    this.setProgress(root, manifest.chunkCount || shardCount || 1, manifest.chunkCount || shardCount || 1);
+    this.setProgress(root, manifest.unitCount || manifest.chunkCount || shardCount || 1, manifest.unitCount || manifest.chunkCount || shardCount || 1);
   }
 
   async siyuanPost(path, payload) {
@@ -886,33 +957,40 @@ class SiyuanKnowledgeAI extends Plugin {
       this.setLog(root, "开始读取思源全库块索引");
       const limit = clampNumber(this.config.maxIndexedBlocks, 100, 100000, DEFAULT_CONFIG.maxIndexedBlocks);
       const sql = [
+        "SELECT * FROM (",
         "SELECT id, root_id, parent_id, box, path, hpath, type, subtype, content, markdown, updated",
         "FROM blocks",
         "WHERE content IS NOT NULL AND content != ''",
         "AND type IN ('d','h','p','l','i','c','b','m','t','s')",
         "ORDER BY updated DESC",
         `LIMIT ${limit}`,
+        ") ORDER BY box, root_id, path, id",
       ].join(" ");
       const rows = (await this.siyuanPost("/api/query/sql", { stmt: sql })) || [];
-      const chunks = [];
-      for (const row of rows) chunks.push(...blockToChunks(row, this.config));
-      if (!chunks.length) throw new Error("没有可索引的块内容");
+      this.setLog(root, `读取到 ${rows.length} 个块，开始提取属性和引用关系`);
+      const metadata = await this.loadIndexMetadata(rows, root);
+      const units = buildKnowledgeUnits(rows, metadata.attrs, metadata.refs, Object.assign({}, this.config, {
+        notebooks: metadata.notebooks,
+      }));
+      if (!units.length) throw new Error("没有可索引的知识单元");
 
-      this.setLog(root, `准备向量化 ${chunks.length} 个片段`);
+      await this.addOptionalSummaries(root, units);
+
+      this.setLog(root, `准备向量化 ${units.length} 个知识单元`);
       const batchSize = clampNumber(this.config.batchSize, 1, 128, DEFAULT_CONFIG.batchSize);
-      for (let start = 0; start < chunks.length; start += batchSize) {
-        const batch = chunks.slice(start, start + batchSize);
-        const embeddings = await this.embedTexts(batch.map((item) => item.text));
+      for (let start = 0; start < units.length; start += batchSize) {
+        const batch = units.slice(start, start + batchSize);
+        const embeddings = await this.embedTexts(batch.map((item) => item.contextText || item.text));
         embeddings.forEach((embedding, index) => {
           batch[index].embedding = embedding;
         });
-        const done = Math.min(start + batch.length, chunks.length);
-        this.setProgress(root, done, chunks.length);
-        this.setLog(root, `向量化 ${done} / ${chunks.length}`);
+        const done = Math.min(start + batch.length, units.length);
+        this.setProgress(root, done, units.length);
+        this.setLog(root, `向量化 ${done} / ${units.length}`);
         await new Promise((resolve) => window.setTimeout(resolve, 0));
       }
 
-      await this.writeIndex(root, rows, chunks);
+      await this.writeIndex(root, rows, units, metadata);
       await this.refreshIndexStatus(root);
       if (!silent) showMessage("Knowledge AI：索引已更新");
     } finally {
@@ -920,7 +998,160 @@ class SiyuanKnowledgeAI extends Plugin {
     }
   }
 
-  async writeIndex(root, rows, chunks) {
+  blockIdList(rows) {
+    return Array.from(
+      new Set(
+        (rows || [])
+          .map((row) => String((row && (row.id || row.block_id || row.blockId)) || "").trim())
+          .filter(Boolean),
+      ),
+    );
+  }
+
+  async sqlInChunks(ids, makeSql, chunkSize) {
+    const size = clampNumber(chunkSize, 50, 800, 400);
+    const rows = [];
+    for (let start = 0; start < ids.length; start += size) {
+      const batch = ids.slice(start, start + size);
+      const quoted = batch.map((id) => `'${escapeSql(id)}'`).join(",");
+      const data = await this.siyuanPost("/api/query/sql", { stmt: makeSql(quoted) });
+      if (Array.isArray(data)) rows.push(...data);
+    }
+    return rows;
+  }
+
+  async loadIndexMetadata(rows, root) {
+    const ids = this.blockIdList(rows);
+    const notebooks = await this.loadNotebookNames(root);
+    const attrs = await this.loadBlockAttrsForIndex(ids, rows, root);
+    const refs = await this.loadRefsForIndex(ids, root);
+    return { attrs, refs, notebooks };
+  }
+
+  async loadNotebookNames(root) {
+    try {
+      const data = await this.siyuanPost("/api/notebook/lsNotebooks", {});
+      const names = {};
+      for (const notebook of data && data.notebooks ? data.notebooks : []) {
+        if (notebook && notebook.id) names[notebook.id] = notebook.name || notebook.id;
+      }
+      return names;
+    } catch (error) {
+      console.warn("Knowledge AI: failed to load notebooks", error);
+      this.setLog(root, "读取笔记本名称失败，索引将使用笔记本 ID", true);
+      return {};
+    }
+  }
+
+  async loadBlockAttrsForIndex(ids, rows, root) {
+    const attrs = {};
+    try {
+      const attrRows = await this.sqlInChunks(
+        ids,
+        (quoted) => `SELECT block_id, name, value FROM attributes WHERE block_id IN (${quoted})`,
+        400,
+      );
+      for (const row of attrRows) {
+        const blockId = String(row.block_id || row.blockId || "").trim();
+        const name = String(row.name || "").trim();
+        if (!blockId || !name) continue;
+        if (!attrs[blockId]) attrs[blockId] = {};
+        attrs[blockId][name] = row.value == null ? "" : String(row.value);
+      }
+      this.setLog(root, `读取属性 ${attrRows.length} 条`);
+      return attrs;
+    } catch (error) {
+      console.warn("Knowledge AI: attributes SQL unavailable", error);
+      this.setLog(root, "属性表读取失败，尝试读取文档和标题块属性", true);
+    }
+
+    const selectedRows = (rows || []).filter((row) => row && (row.type === "d" || row.type === "h")).slice(0, 300);
+    for (const row of selectedRows) {
+      try {
+        const data = await this.siyuanPost("/api/attr/getBlockAttrs", { id: row.id });
+        if (data && typeof data === "object") attrs[row.id] = data;
+      } catch (error) {
+        console.warn("Knowledge AI: failed to load block attrs", row.id, error);
+      }
+    }
+    this.setLog(root, `读取属性 ${Object.keys(attrs).length} 个块`);
+    return attrs;
+  }
+
+  async loadRefsForIndex(ids, root) {
+    const seen = new Set();
+    const refs = [];
+    try {
+      const refRows = await this.sqlInChunks(
+        ids,
+        (quoted) => `SELECT * FROM refs WHERE block_id IN (${quoted}) OR def_block_id IN (${quoted})`,
+        300,
+      );
+      for (const row of refRows) {
+        const source = row.block_id || row.blockID || row.blockId;
+        const target = row.def_block_id || row.defBlockId || row.def_id || row.target_id;
+        const key = `${source || ""}->${target || ""}`;
+        if (!source || !target || seen.has(key)) continue;
+        seen.add(key);
+        refs.push(row);
+      }
+      this.setLog(root, `读取块引用 ${refs.length} 条`);
+    } catch (error) {
+      console.warn("Knowledge AI: refs SQL unavailable", error);
+      this.setLog(root, "引用表读取失败，将从 Markdown 文本中解析块引用", true);
+    }
+    return refs;
+  }
+
+  async addOptionalSummaries(root, units) {
+    if (!this.config.enableAiSummaries) return;
+    const targets = (units || []).filter((unit) => unit.type && unit.type !== "block");
+    const limit = clampNumber(this.config.aiSummaryMaxUnits, 1, 1000, DEFAULT_CONFIG.aiSummaryMaxUnits);
+    const selected = targets.slice(0, limit);
+    if (!selected.length) return;
+    if (targets.length > selected.length) {
+      this.setLog(root, `AI 摘要仅处理前 ${selected.length} / ${targets.length} 个主题单元`);
+    } else {
+      this.setLog(root, `AI 摘要处理 ${selected.length} 个主题单元`);
+    }
+    for (let index = 0; index < selected.length; index += 1) {
+      const unit = selected[index];
+      const summary = await this.summarizeUnit(unit);
+      unit.summary = summary;
+      unit.contextText = [`AI 摘要: ${summary}`, "", unit.contextText || unit.text].join("\n");
+      unit.hash = stableHash(`${unit.hash}\n${summary}`);
+      this.setProgress(root, index + 1, selected.length);
+      this.setLog(root, `生成主题摘要 ${index + 1} / ${selected.length}`);
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    }
+  }
+
+  async summarizeUnit(unit) {
+    const messages = [
+      {
+        role: "system",
+        content: "你是思源笔记知识库索引助手。请根据给定知识单元生成中文主题摘要，只输出摘要，不要写入笔记，不要编造。",
+      },
+      {
+        role: "user",
+        content: [
+          `层级：${unit.type}`,
+          `标题：${unit.title || unit.hpath || unit.id}`,
+          unit.tags && unit.tags.length ? `标签：${unit.tags.join("，")}` : "",
+          "",
+          "内容：",
+          String(unit.text || unit.contextText || "").slice(0, 5000),
+          "",
+          "请用 120 字以内概括主题、关键事实和用途。",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      },
+    ];
+    return (await this.chat(messages)).trim().slice(0, 600);
+  }
+
+  async writeIndex(root, rows, units, metadata) {
     await this.ensureIndexDirs();
     const oldManifest = await this.readManifest();
     if (oldManifest && Array.isArray(oldManifest.shards)) {
@@ -937,31 +1168,40 @@ class SiyuanKnowledgeAI extends Plugin {
 
     const shardSize = clampNumber(this.config.shardSize, 20, 500, DEFAULT_CONFIG.shardSize);
     const shards = [];
-    for (let start = 0; start < chunks.length; start += shardSize) {
-      const shardChunks = chunks.slice(start, start + shardSize);
+    for (let start = 0; start < units.length; start += shardSize) {
+      const shardUnits = units.slice(start, start + shardSize);
       const shardId = `shard-${String(shards.length + 1).padStart(5, "0")}`;
       const path = makeShardPath(PLUGIN_NAME, shardId);
       await this.putJsonFile(path, {
         id: shardId,
         createdAt: nowIso(),
-        chunks: shardChunks,
+        schemaVersion: CURRENT_INDEX_VERSION,
+        units: shardUnits,
       });
-      shards.push({ id: shardId, path, count: shardChunks.length });
+      shards.push({ id: shardId, path, count: shardUnits.length });
       this.setLog(root, `写入同步分片 ${shards.length}`);
     }
 
+    const unitCounts = {};
+    for (const unit of units) unitCounts[unit.type] = (unitCounts[unit.type] || 0) + 1;
     const manifest = {
       version: CURRENT_INDEX_VERSION,
+      schemaVersion: CURRENT_INDEX_VERSION,
       plugin: PLUGIN_NAME,
       builtAt: nowIso(),
       baseUrl: normalizeBaseUrl(this.config.baseUrl),
       embeddingModel: this.config.embeddingModel,
       chunkSize: this.config.chunkSize,
       chunkOverlap: this.config.chunkOverlap,
+      structuredIndex: true,
+      aiSummaries: Boolean(this.config.enableAiSummaries),
       blockCount: rows.length,
-      chunkCount: chunks.length,
+      chunkCount: units.length,
+      unitCount: units.length,
+      unitCounts,
+      notebookCount: metadata && metadata.notebooks ? Object.keys(metadata.notebooks).length : 0,
       shards,
-      hash: stableHash(chunks.map((item) => item.hash).join("\n")),
+      hash: stableHash(units.map((item) => item.hash).join("\n")),
     };
     await this.putJsonFile(makeManifestPath(PLUGIN_NAME), manifest);
   }
@@ -989,22 +1229,16 @@ class SiyuanKnowledgeAI extends Plugin {
 
   async loadIndexedChunks() {
     const manifest = await this.readManifest();
-    if (!manifest || !Array.isArray(manifest.shards) || !manifest.shards.length) {
-      throw new Error("索引不存在，请先在设置中更新索引并等待思源同步");
-    }
-    if (manifest.version !== CURRENT_INDEX_VERSION) {
-      throw new Error("索引版本不兼容，请重新更新索引");
-    }
-    if (manifest.embeddingModel !== this.config.embeddingModel) {
-      throw new Error(`当前 Embedding 模型为 ${this.config.embeddingModel}，索引使用 ${manifest.embeddingModel}，请切回该模型或重新更新索引`);
-    }
-    const chunks = [];
+    const manifestError = getIndexManifestError(manifest, this.config, CURRENT_INDEX_VERSION);
+    if (manifestError) throw new Error(manifestError);
+    const units = [];
     for (const shard of manifest.shards) {
       const data = await this.readJsonFile(shard.path, null);
-      if (data && Array.isArray(data.chunks)) chunks.push(...data.chunks);
+      if (data && Array.isArray(data.units)) units.push(...data.units);
+      else if (data && Array.isArray(data.chunks)) units.push(...data.chunks);
     }
-    if (!chunks.length) throw new Error("索引分片为空，请等待同步完成或重新更新索引");
-    return chunks;
+    if (!units.length) throw new Error("索引分片为空，请等待同步完成或重新更新索引");
+    return units;
   }
 
   async modelPost(endpoint, payload, label, options) {
@@ -1013,15 +1247,50 @@ class SiyuanKnowledgeAI extends Plugin {
     const apiKey = runtime.apiKey == null ? this.getApiKey() : runtime.apiKey;
     const baseUrl = normalizeModelBaseUrlForRequest(config.baseUrl);
     const url = `${baseUrl}/${String(endpoint || "").replace(/^\/+/, "")}`;
-    if (isLocalModelBaseUrl(baseUrl)) {
-      return this.directModelPost(url, apiKey, payload, label, config.modelTimeoutMs);
+    const routes = getModelRequestRoutes(config, baseUrl);
+    const errors = [];
+
+    for (let index = 0; index < routes.length; index += 1) {
+      const route = routes[index];
+      try {
+        const data = await this.requestModelByRoute(route, url, apiKey, payload, label, config);
+        this.lastModelRoute = {
+          route,
+          fallbackFrom: index > 0 ? routes[index - 1] : "",
+          attempts: routes.slice(0, index + 1),
+        };
+        return data;
+      } catch (error) {
+        const tagged = markModelRouteError(error, route);
+        errors.push(tagged);
+        if (!isFallbackAllowed(tagged, config, routes.slice(index + 1))) {
+          throw this.composeModelRouteError(label, errors);
+        }
+        console.warn("Knowledge AI: model route failed, trying fallback", route, tagged);
+      }
     }
-    const proxyPayload = buildModelProxyPayload(url, apiKey, payload, config.modelTimeoutMs);
-    const data = await this.siyuanPost("/api/network/forwardProxy", proxyPayload);
-    return parseModelProxyJson(data, label);
+
+    throw this.composeModelRouteError(label, errors);
   }
 
-  async directModelPost(url, apiKey, payload, label, timeout) {
+  async requestModelByRoute(route, url, apiKey, payload, label, config) {
+    if (route === "direct") return this.modelPostViaDirect(url, apiKey, payload, label, config.modelTimeoutMs);
+    if (route === "siyuan") return this.modelPostViaSiyuanProxy(url, apiKey, payload, label, config.modelTimeoutMs);
+    if (route === "gateway") return this.modelPostViaGateway(url, apiKey, payload, label, config);
+    throw new Error(`未知模型请求路由：${route}`);
+  }
+
+  async modelPostViaSiyuanProxy(url, apiKey, payload, label, timeout) {
+    const proxyPayload = buildModelProxyPayload(url, apiKey, payload, timeout);
+    try {
+      const data = await this.siyuanPost("/api/network/forwardProxy", proxyPayload);
+      return parseModelProxyJson(data, label);
+    } catch (error) {
+      throw markModelRouteError(error, "siyuan", false);
+    }
+  }
+
+  async modelPostViaDirect(url, apiKey, payload, label, timeout) {
     let response;
     let body = "";
     const controller = typeof AbortController === "function" ? new AbortController() : null;
@@ -1037,13 +1306,92 @@ class SiyuanKnowledgeAI extends Plugin {
       });
       body = await response.text();
     } catch (error) {
-      throw new Error(
-        `${label} API 本地直连失败：${error.message || error}。请确认本地模型服务已启动，且 Base URL 使用 http://127.0.0.1:端口/v1。`,
+      throw markModelRouteError(
+        new Error(
+          `${label} API 浏览器直连失败：${error.message || error}。本地模型请确认服务已启动；远程模型可切换到思源转发或自定义转发网关。`,
+        ),
+        "direct",
+        true,
       );
     } finally {
       if (timeoutId) window.clearTimeout(timeoutId);
     }
-    return parseModelProxyJson({ status: response.status, body, url }, label);
+    try {
+      return parseModelProxyJson({ status: response.status, body, url }, label);
+    } catch (error) {
+      throw markModelRouteError(error, "direct", false);
+    }
+  }
+
+  async modelPostViaGateway(url, apiKey, payload, label, config) {
+    let gateway;
+    let proxyPayload;
+    try {
+      const built = buildGatewayProxyPayload(config.proxyGatewayUrl, url, apiKey, payload, config.modelTimeoutMs);
+      gateway = built.gatewayUrl;
+      proxyPayload = built.payload;
+    } catch (error) {
+      throw markModelRouteError(error, "gateway", false);
+    }
+
+    let response;
+    let body = "";
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timeoutId = controller
+      ? window.setTimeout(() => controller.abort(), clampNumber(config.modelTimeoutMs, 1000, 10 * 60 * 1000, DEFAULT_CONFIG.modelTimeoutMs))
+      : null;
+    try {
+      response = await fetch(gateway, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(proxyPayload),
+        signal: controller ? controller.signal : undefined,
+      });
+      body = await response.text();
+    } catch (error) {
+      throw markModelRouteError(new Error(`${label} API 自定义转发网关失败：${error.message || error}`), "gateway", true);
+    } finally {
+      if (timeoutId) window.clearTimeout(timeoutId);
+    }
+
+    let parsedGateway = null;
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed && typeof parsed.status !== "undefined" && typeof parsed.body !== "undefined") parsedGateway = parsed;
+    } catch (error) {
+      // 非 forwardProxy 响应时按普通 HTTP 响应解析。
+    }
+    if (parsedGateway) {
+      try {
+        return parseModelProxyJson(parsedGateway, label);
+      } catch (error) {
+        throw markModelRouteError(error, "gateway", false);
+      }
+    }
+
+    try {
+      return parseModelProxyJson({ status: response.status, body, url: gateway }, label);
+    } catch (error) {
+      throw markModelRouteError(error, "gateway", false);
+    }
+  }
+
+  formatLastModelRoute() {
+    const info = this.lastModelRoute || {};
+    const current = modelRouteLabel(info.route);
+    if (info.fallbackFrom) return `${current}，由 ${modelRouteLabel(info.fallbackFrom)} 回退`;
+    return current || "未知路由";
+  }
+
+  composeModelRouteError(label, errors) {
+    const list = (errors || []).filter(Boolean);
+    if (list.length === 1) return list[0];
+    const detail = list.map((error) => `${modelRouteLabel(error.route)}：${error.message || error}`).join("；");
+    const message = detail || "无详细错误";
+    const composed = new Error(`${label} API 请求失败，已尝试 ${list.map((error) => modelRouteLabel(error.route)).join(" -> ")}：${message}`);
+    composed.routes = list.map((error) => error.route);
+    composed.isNetworkError = list.some((error) => error.isNetworkError);
+    return composed;
   }
 
   async embedTexts(texts, options) {
@@ -1426,7 +1774,8 @@ class SiyuanKnowledgeAI extends Plugin {
       this.lastSources.forEach((item, index) => {
         const chunk = item.chunk;
         const sourceTitle = chunk.hpath || chunk.title || chunk.blockId;
-        lines.push(`${index + 1}. ${sourceTitle} \`${chunk.blockId}\``);
+        const blockRef = chunk.blockId ? ` \`${chunk.blockId}\`` : "";
+        lines.push(`${index + 1}. [${this.sourceTypeLabel(chunk)}] ${sourceTitle}${blockRef}`);
       });
     }
     return lines.join("\n");
