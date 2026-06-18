@@ -22,8 +22,8 @@ const {
 } = require("./lib/core");
 
 const {
+  Dialog,
   Plugin,
-  Setting,
   fetchSyncPost,
   getActiveEditor,
   openTab,
@@ -126,65 +126,112 @@ class SiyuanKnowledgeAI extends Plugin {
   }
 
   createSettingPanel() {
-    this.settingElements = {};
-    this.setting = new Setting({
-      width: "760px",
-      height: "720px",
-      confirmCallback: () => this.saveSettingPanel(),
-    });
-
-    this.addSettingInput("baseUrl", "接口地址", "OpenAI 或 OpenAI-compatible Base URL，例如 https://api.openai.com/v1。");
-    this.addSettingInput("apiKey", "API Key", "本机保存，不写入同步索引；本地 Ollama 可留空。", { password: true, local: true });
-    this.addSettingInput("chatModel", "聊天模型", "用于回答、生成草稿和改写笔记。");
-    this.addSettingInput("embeddingModel", "Embedding 模型", "用于全库索引和提问检索；换模型后需要重建索引。");
-    this.addSettingInput("temperature", "温度", "回答和草稿生成的随机性。", { number: true, step: "0.1", min: "0", max: "2" });
-    this.addSettingInput("topK", "引用数量", "每次问答最多送入模型的笔记片段数。", { number: true, min: "1", max: "30" });
-    this.addSettingInput("maxIndexedBlocks", "索引块上限", "手动更新索引时最多读取多少个思源块。", { number: true, min: "100" });
-    this.addSettingInput("chunkSize", "片段长度", "单个索引片段的最大字符数。", { number: true, min: "200" });
-    this.addSettingInput("chunkOverlap", "片段重叠", "相邻片段保留的重叠字符数。", { number: true, min: "0" });
-    this.addSettingInput("batchSize", "向量批量", "每次 Embedding 请求包含的片段数。", { number: true, min: "1", max: "128" });
-    this.addSettingInput("shardSize", "分片大小", "每个同步索引分片保存的片段数。", { number: true, min: "20", max: "500" });
-    this.addSettingInput("modelTimeoutMs", "模型超时毫秒", "通过思源代理调用模型接口的超时时间。", { number: true, min: "1000" });
-    this.addSettingInput("defaultNotebook", "默认笔记本 ID", "新增笔记保存到这个笔记本；也可在工作台中读取并选择。");
-    this.addSettingInput("defaultPath", "默认保存路径", "新增 AI 笔记的父路径。");
-    this.addSettingInput("allowWriteActions", "允许写入笔记", "关闭后只能问答，不能新增、追加或修改笔记。", { checkbox: true });
-    this.addSettingInput("autoIndexOnStart", "启动后定期更新", "启用后按下方间隔自动重建索引。", { checkbox: true });
-    this.addSettingInput("autoIndexEveryHours", "自动索引间隔小时", "仅在启用定期更新时生效。", { number: true, min: "1" });
-    this.addSettingInput("systemPrompt", "系统提示词", "问答时使用的系统提示词。", { textarea: true });
+    this.setting = {
+      open: () => this.openSetting(),
+    };
   }
 
-  addSettingInput(key, title, description, options) {
+  openSetting() {
+    const dialog = new Dialog({
+      title: this.name,
+      content: this.renderSettingsDialog(),
+      width: "min(760px, 92vw)",
+      height: "min(720px, 86vh)",
+    });
+    const root = dialog.element.querySelector(".kai-settings-dialog");
+    this.bindSettingsDialog(root, dialog);
+  }
+
+  renderSettingsDialog() {
+    return `
+      <div class="kai-settings-dialog">
+        <div class="kai-settings-scroll">
+          ${this.renderSettingField("baseUrl", "接口地址", "OpenAI 或 OpenAI-compatible Base URL，例如 https://api.openai.com/v1。")}
+          ${this.renderSettingField("apiKey", "API Key", "本机保存，不写入同步索引；本地 Ollama 可留空。", { password: true, local: true })}
+          ${this.renderSettingField("chatModel", "聊天模型", "用于回答、生成草稿和改写笔记。")}
+          ${this.renderSettingField("embeddingModel", "Embedding 模型", "用于全库索引和提问检索；换模型后需要重建索引。")}
+          ${this.renderSettingField("temperature", "温度", "回答和草稿生成的随机性。", { number: true, step: "0.1", min: "0", max: "2" })}
+          ${this.renderSettingField("topK", "引用数量", "每次问答最多送入模型的笔记片段数。", { number: true, min: "1", max: "30" })}
+          ${this.renderSettingField("maxIndexedBlocks", "索引块上限", "手动更新索引时最多读取多少个思源块。", { number: true, min: "100" })}
+          ${this.renderSettingField("chunkSize", "片段长度", "单个索引片段的最大字符数。", { number: true, min: "200" })}
+          ${this.renderSettingField("chunkOverlap", "片段重叠", "相邻片段保留的重叠字符数。", { number: true, min: "0" })}
+          ${this.renderSettingField("batchSize", "向量批量", "每次 Embedding 请求包含的片段数。", { number: true, min: "1", max: "128" })}
+          ${this.renderSettingField("shardSize", "分片大小", "每个同步索引分片保存的片段数。", { number: true, min: "20", max: "500" })}
+          ${this.renderSettingField("modelTimeoutMs", "模型超时毫秒", "通过思源代理调用模型接口的超时时间。", { number: true, min: "1000" })}
+          ${this.renderSettingField("defaultNotebook", "默认笔记本 ID", "新增笔记保存到这个笔记本；也可在工作台中读取并选择。")}
+          ${this.renderSettingField("defaultPath", "默认保存路径", "新增 AI 笔记的父路径。")}
+          ${this.renderSettingField("allowWriteActions", "允许写入笔记", "关闭后只能问答，不能新增、追加或修改笔记。", { checkbox: true })}
+          ${this.renderSettingField("autoIndexOnStart", "启动后定期更新", "启用后按下方间隔自动重建索引。", { checkbox: true })}
+          ${this.renderSettingField("autoIndexEveryHours", "自动索引间隔小时", "仅在启用定期更新时生效。", { number: true, min: "1" })}
+          ${this.renderSettingField("systemPrompt", "系统提示词", "问答时使用的系统提示词。", { textarea: true })}
+        </div>
+        <div class="kai-settings-actions">
+          <button class="b3-button b3-button--cancel" data-kai-settings-cancel>取消</button>
+          <button class="b3-button" data-kai-settings-save>保存</button>
+        </div>
+      </div>
+    `;
+  }
+
+  renderSettingField(key, title, description, options) {
     const settingOptions = options || {};
-    this.setting.addItem({
-      title,
-      description,
-      direction: settingOptions.textarea ? "column" : "row",
-      createActionElement: () => {
-        const element = settingOptions.textarea ? document.createElement("textarea") : document.createElement("input");
-        element.className = settingOptions.textarea ? "b3-text-field kai-setting-textarea" : "b3-text-field kai-setting-input";
-        if (settingOptions.checkbox) {
-          element.type = "checkbox";
-          element.className = "b3-switch fn__flex-shrink";
-          element.checked = Boolean(this.config[key]);
-        } else {
-          element.type = settingOptions.password ? "password" : settingOptions.number ? "number" : "text";
-          if (settingOptions.step) element.step = settingOptions.step;
-          if (settingOptions.min) element.min = settingOptions.min;
-          if (settingOptions.max) element.max = settingOptions.max;
-          element.value = settingOptions.local ? this.getApiKey() : String(this.config[key] == null ? "" : this.config[key]);
-        }
-        element.dataset.kaiSettingKey = key;
-        if (settingOptions.local) element.dataset.kaiLocal = "true";
-        this.settingElements[key] = element;
-        return element;
-      },
+    const local = settingOptions.local ? ` data-kai-local="true"` : "";
+    const value = settingOptions.local ? this.getApiKey() : this.config[key];
+    const common = `data-kai-setting-key="${escapeHtml(key)}"${local}`;
+    let control = "";
+    if (settingOptions.checkbox) {
+      control = `<input class="b3-switch fn__flex-shrink" type="checkbox" ${common} ${value ? "checked" : ""}>`;
+    } else if (settingOptions.textarea) {
+      control = `<textarea class="b3-text-field kai-setting-textarea" ${common}>${escapeHtml(value == null ? "" : value)}</textarea>`;
+    } else {
+      const type = settingOptions.password ? "password" : settingOptions.number ? "number" : "text";
+      const attrs = [
+        `type="${type}"`,
+        settingOptions.step ? `step="${escapeHtml(settingOptions.step)}"` : "",
+        settingOptions.min ? `min="${escapeHtml(settingOptions.min)}"` : "",
+        settingOptions.max ? `max="${escapeHtml(settingOptions.max)}"` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
+      control = `<input class="b3-text-field kai-setting-input" ${attrs} ${common} value="${escapeHtml(value == null ? "" : value)}">`;
+    }
+    return `
+      <label class="kai-setting-row ${settingOptions.checkbox ? "kai-setting-row-check" : ""}">
+        <span class="kai-setting-copy">
+          <span class="kai-setting-title">${escapeHtml(title)}</span>
+          <span class="kai-setting-desc">${escapeHtml(description)}</span>
+        </span>
+        ${control}
+      </label>
+    `;
+  }
+
+  bindSettingsDialog(root, dialog) {
+    if (!root) return;
+    root.addEventListener("click", async (event) => {
+      const cancel = event.target.closest("[data-kai-settings-cancel]");
+      const save = event.target.closest("[data-kai-settings-save]");
+      if (!cancel && !save) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (cancel) {
+        dialog.destroy();
+        return;
+      }
+      try {
+        await this.saveSettingsFromDialog(root);
+        dialog.destroy();
+      } catch (error) {
+        console.error("Knowledge AI: failed to save settings", error);
+        showMessage(`Knowledge AI：${error.message || error}`, 7000, "error");
+      }
     });
   }
 
-  async saveSettingPanel() {
+  async saveSettingsFromDialog(root) {
     const next = Object.assign({}, this.config);
-    for (const [key, element] of Object.entries(this.settingElements || {})) {
-      if (!element) continue;
+    for (const element of root.querySelectorAll("[data-kai-setting-key]")) {
+      const key = element.getAttribute("data-kai-setting-key");
       if (element.dataset.kaiLocal === "true") {
         this.setApiKey(element.value);
       } else if (element.type === "checkbox") {

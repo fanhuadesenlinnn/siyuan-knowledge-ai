@@ -157,6 +157,58 @@
   width: 100%;
 }
 
+.kai-settings-dialog {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.kai-settings-scroll {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 16px 12px;
+}
+
+.kai-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--b3-border-color);
+  background: var(--b3-theme-background);
+}
+
+.kai-setting-row {
+  display: grid;
+  gap: 8px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--b3-border-color);
+  color: var(--b3-theme-on-surface);
+}
+
+.kai-setting-row-check {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.kai-setting-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.kai-setting-title {
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.kai-setting-desc {
+  color: var(--b3-theme-on-surface-light);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .kai-setting-input {
   max-width: 360px;
 }
