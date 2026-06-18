@@ -7,10 +7,12 @@ const {
   buildMessages,
   chunkText,
   cosineSimilarity,
+  detectProvider,
   extractChatContent,
   extractEmbeddings,
   mergeConfig,
   parseModelProxyJson,
+  PROVIDER_PRESETS,
   rankChunks,
   stableHash,
 } = require("../lib/core");
@@ -54,6 +56,30 @@ assert.strictEqual(messages.length, 2);
 assert.ok(messages[1].content.includes("测试问题"));
 assert.ok(messages[1].content.includes("[1]"));
 
+// 带 history：历史插在 system 与检索上下文之间，最后仍是当前问题
+const history = [
+  { role: "user", content: "上一轮问题" },
+  { role: "assistant", content: "上一轮回答" },
+];
+const messagesWithHistory = buildMessages(config, "本轮问题", ranked, history);
+assert.strictEqual(messagesWithHistory.length, 4);
+assert.strictEqual(messagesWithHistory[0].role, "system");
+assert.strictEqual(messagesWithHistory[1].content, "上一轮问题");
+assert.strictEqual(messagesWithHistory[2].content, "上一轮回答");
+assert.ok(messagesWithHistory[3].content.includes("本轮问题"));
+assert.ok(messagesWithHistory[3].content.includes("[1]"));
+
+// 历史中混入无效项应被过滤，不破坏消息结构
+const messyHistory = [
+  { role: "system", content: "忽略我" },
+  { role: "user", content: "" },
+  { role: "assistant", content: "保留这条" },
+  null,
+];
+const messagesMessy = buildMessages(config, "问题", ranked, messyHistory);
+assert.strictEqual(messagesMessy.length, 3);
+assert.strictEqual(messagesMessy[1].content, "保留这条");
+
 const proxyPayload = buildModelProxyPayload(
   "https://api.example.com/v1/chat/completions",
   "sk-test",
@@ -85,5 +111,29 @@ assert.deepStrictEqual(
   ],
 );
 assert.throws(() => parseModelProxyJson({ status: 401, body: "bad key" }, "Chat"), /401/);
+
+// detectProvider：已知 baseUrl 精确匹配
+assert.strictEqual(detectProvider("https://api.openai.com/v1"), "openai");
+assert.strictEqual(detectProvider("https://api.openai.com/v1/"), "openai");
+assert.strictEqual(detectProvider("https://generativelanguage.googleapis.com/v1beta/openai"), "gemini");
+assert.strictEqual(detectProvider("http://localhost:11434/v1"), "ollama");
+// 容错：改过路径但 host 相同
+assert.strictEqual(detectProvider("https://api.openai.com/v1/custom"), "openai");
+assert.strictEqual(detectProvider("https://generativelanguage.googleapis.com/v1beta/openai/extra"), "gemini");
+// 未知 URL 返回 custom
+assert.strictEqual(detectProvider("https://my-proxy.example.com/v1"), "custom");
+assert.strictEqual(detectProvider(""), "custom");
+assert.strictEqual(detectProvider(null), "custom");
+
+// PROVIDER_PRESETS 结构校验
+assert.ok(Array.isArray(PROVIDER_PRESETS));
+assert.strictEqual(PROVIDER_PRESETS.length, 3);
+for (const p of PROVIDER_PRESETS) {
+  assert.ok(p.id && typeof p.id === "string");
+  assert.ok(p.label && typeof p.label === "string");
+  assert.ok(p.baseUrl && typeof p.baseUrl === "string");
+  assert.ok(p.chatModel && typeof p.chatModel === "string");
+  assert.ok(p.embeddingModel && typeof p.embeddingModel === "string");
+}
 
 console.log("core tests passed");

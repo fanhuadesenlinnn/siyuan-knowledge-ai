@@ -1,122 +1,364 @@
-.kai-workbench-host {
+/* ===== Dock 面板 ===== */
+.kai-dock-host {
   height: 100%;
 }
 
-.kai-root {
+.kai-dock {
   height: 100%;
-  box-sizing: border-box;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   color: var(--b3-theme-on-background);
   background: var(--b3-theme-background);
 }
 
-.kai-root * {
+.kai-dock * {
   box-sizing: border-box;
 }
 
-.kai-shell {
-  display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
-  height: 100%;
-  min-height: 0;
-}
-
-.kai-sidebar {
-  min-width: 0;
-  overflow: auto;
-  border-right: 1px solid var(--b3-border-color);
+.kai-dock-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--b3-border-color);
   background: var(--b3-theme-surface);
-  padding: 14px;
-}
-
-.kai-main {
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
-  padding: 16px;
-  display: grid;
-  gap: 14px;
-  align-content: start;
-}
-
-.kai-chat-pane {
-  min-height: calc(100vh - 72px);
-  grid-template-rows: auto auto auto auto minmax(0, 1fr);
 }
 
 .kai-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: 8px;
+  min-width: 0;
 }
 
 .kai-brand svg {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   fill: var(--b3-theme-primary);
   flex: 0 0 auto;
 }
 
+.kai-brand-text {
+  min-width: 0;
+}
+
 .kai-title {
   font-weight: 700;
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1.3;
-}
-
-.kai-section,
-.kai-pane {
-  border: 1px solid var(--b3-border-color);
-  border-radius: 6px;
-  background: var(--b3-theme-background);
-}
-
-.kai-section {
-  padding: 12px;
-  margin-bottom: 12px;
-  display: grid;
-  gap: 10px;
-}
-
-.kai-pane {
-  padding: 14px;
-  display: grid;
-  gap: 12px;
-}
-
-.kai-section-head {
-  font-weight: 650;
-  font-size: 13px;
-  line-height: 1.4;
-}
-
-.kai-pane-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.kai-pane-head h2 {
-  margin: 0;
-  font-size: 16px;
-  line-height: 1.4;
-}
-
-.kai-pane-head p {
-  margin: 2px 0 0;
-  color: var(--b3-theme-on-surface-light);
-  font-size: 12px;
-  line-height: 1.5;
 }
 
 .kai-muted {
   color: var(--b3-theme-on-surface-light);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kai-icon-btn {
+  padding: 4px 10px;
+  font-size: 14px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+/* ===== 消息流 ===== */
+.kai-messages {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.kai-empty-tip {
+  margin: auto;
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--b3-theme-on-surface-light);
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.7;
+}
+
+.kai-msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+}
+
+.kai-msg-user {
+  align-items: flex-end;
+}
+
+.kai-msg-assistant {
+  align-items: flex-start;
+}
+
+.kai-bubble {
+  max-width: 90%;
+  padding: 9px 12px;
+  border-radius: 10px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.kai-msg-user .kai-bubble {
+  background: var(--b3-theme-primary);
+  color: var(--b3-theme-on-primary);
+  border-bottom-right-radius: 3px;
+}
+
+.kai-msg-assistant .kai-bubble {
+  background: var(--b3-theme-surface);
+  color: var(--b3-theme-on-surface);
+  border: 1px solid var(--b3-border-color);
+  border-bottom-left-radius: 3px;
+}
+
+.kai-bubble pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+/* ===== 助手消息操作行 ===== */
+.kai-msg-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 5px;
+  padding-left: 2px;
+}
+
+.kai-msg-btn {
+  border: none;
+  background: transparent;
+  color: var(--b3-theme-on-surface-light);
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.kai-msg-btn:hover {
+  background: var(--b3-list-hover);
+  color: var(--b3-theme-on-surface);
+}
+
+/* ===== 引用来源（助手气泡内可折叠） ===== */
+.kai-sources {
+  max-width: 92%;
+  margin-top: 6px;
+  border: 1px solid var(--b3-border-color);
+  border-radius: 6px;
+  background: var(--b3-theme-background);
+  overflow: hidden;
+}
+
+.kai-sources-toggle {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--b3-theme-on-surface);
+  cursor: pointer;
+  user-select: none;
+}
+
+.kai-sources-body {
+  display: none;
+  padding: 0 10px 10px;
+}
+
+.kai-sources-open .kai-sources-body {
+  display: grid;
+  gap: 8px;
+}
+
+.kai-source {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--b3-border-color);
+  border-radius: 6px;
+  background: var(--b3-theme-surface);
+}
+
+.kai-source-index {
+  display: grid;
+  place-items: center;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--b3-theme-background);
+  color: var(--b3-theme-primary);
+  font-weight: 650;
+  font-size: 11px;
+}
+
+.kai-source-title {
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.kai-source-text {
+  margin: 4px 0 6px;
+  color: var(--b3-theme-on-surface);
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.kai-source .kai-actions {
+  gap: 6px;
+}
+
+.kai-source .b3-button {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+/* ===== 底部输入区 ===== */
+.kai-composer {
+  border-top: 1px solid var(--b3-border-color);
+  background: var(--b3-theme-surface);
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.kai-input {
+  width: 100%;
+  min-height: 64px;
+  max-height: 160px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.kai-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ===== 设置弹窗（Tab 分页） ===== */
+.kai-settings-dialog {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.kai-settings-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--b3-border-color);
+  background: var(--b3-theme-surface);
+  padding: 0 8px;
+}
+
+.kai-settings-tab {
+  border: none;
+  background: transparent;
+  padding: 12px 18px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--b3-theme-on-surface-light);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.12s;
+}
+
+.kai-settings-tab:hover {
+  color: var(--b3-theme-on-surface);
+}
+
+.kai-settings-tab--active {
+  color: var(--b3-theme-primary);
+  border-bottom-color: var(--b3-theme-primary);
+}
+
+.kai-settings-body {
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.kai-settings-page {
+  display: none;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 20px 16px;
+}
+
+.kai-settings-page--active {
+  display: block;
+}
+
+.kai-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--b3-border-color);
+  background: var(--b3-theme-background);
+}
+
+/* 字段：左标题+说明，右控件，整齐对齐 */
+.kai-setting-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 220px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--b3-border-color);
+  color: var(--b3-theme-on-surface);
+}
+
+.kai-setting-row-check {
+  grid-template-columns: minmax(120px, 220px) auto;
+}
+
+.kai-setting-copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.kai-setting-title {
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.kai-setting-desc {
+  color: var(--b3-theme-on-surface-light);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.kai-setting-input {
+  width: 100%;
+  max-width: 420px;
+}
+
+.kai-setting-textarea {
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
 }
 
 .kai-status {
-  min-height: 46px;
+  min-height: 40px;
   padding: 8px;
   border-radius: 6px;
   background: var(--b3-theme-background);
@@ -139,95 +381,26 @@
   align-items: center;
 }
 
-.kai-actions-stack {
-  display: grid;
+.kai-actions-index {
+  margin: 4px 0;
 }
 
-.kai-actions-stack .b3-button {
-  width: 100%;
-}
-
-.kai-answer-actions {
-  padding-top: 4px;
-}
-
-.kai-sidebar label,
-.kai-pane label,
-.kai-compose-dialog label {
-  display: grid;
-  gap: 5px;
-  color: var(--b3-theme-on-surface);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.kai-input,
-.kai-setting-input,
-.kai-setting-textarea {
-  width: 100%;
-}
-
-.kai-settings-dialog {
-  height: 100%;
-  min-height: 0;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-}
-
-.kai-settings-scroll {
-  min-height: 0;
+.kai-log {
+  min-height: 60px;
+  max-height: 140px;
   overflow: auto;
-  padding: 0 16px 12px;
-}
-
-.kai-settings-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--b3-border-color);
-  background: var(--b3-theme-background);
-}
-
-.kai-setting-row {
-  display: grid;
-  gap: 8px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--b3-border-color);
-  color: var(--b3-theme-on-surface);
-}
-
-.kai-setting-row-check {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-}
-
-.kai-setting-copy {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.kai-setting-title {
-  font-weight: 650;
-  line-height: 1.4;
-}
-
-.kai-setting-desc {
+  margin: 8px 0 0;
+  padding: 10px;
+  border: 1px solid var(--b3-border-color);
+  border-radius: 6px;
+  background: var(--b3-theme-surface);
   color: var(--b3-theme-on-surface-light);
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 
-.kai-setting-input {
-  max-width: 360px;
-}
-
-.kai-setting-textarea {
-  min-height: 110px;
-  resize: vertical;
-}
-
+/* ===== 写入动作弹窗（沿用旧样式） ===== */
 .kai-compose-dialog {
   height: 100%;
   min-height: 0;
@@ -259,39 +432,20 @@
   gap: 10px;
 }
 
-.kai-inline-button {
-  align-self: end;
-  width: max-content;
-}
-
-.kai-kv {
+.kai-compose-dialog label {
   display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.kai-kv span {
-  color: var(--b3-theme-on-surface-light);
-  font-size: 11px;
-}
-
-.kai-kv strong {
+  gap: 5px;
   color: var(--b3-theme-on-surface);
   font-size: 12px;
-  font-weight: 500;
-  word-break: break-all;
+  line-height: 1.4;
 }
 
-.kai-question,
-.kai-prompt,
-.kai-draft {
+.kai-compose-dialog .kai-input,
+.kai-compose-dialog .kai-prompt,
+.kai-compose-dialog .kai-draft {
   width: 100%;
   resize: vertical;
   line-height: 1.6;
-}
-
-.kai-question {
-  min-height: 118px;
 }
 
 .kai-prompt {
@@ -303,109 +457,14 @@
   font-family: var(--b3-font-family-code);
 }
 
-.kai-answer {
-  min-height: 136px;
-  border: 1px solid var(--b3-border-color);
-  border-radius: 6px;
-  padding: 12px;
-  background: var(--b3-theme-surface);
-}
-
-.kai-answer pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: inherit;
-  line-height: 1.7;
-}
-
-.kai-empty {
-  color: var(--b3-theme-on-surface-light);
-  font-size: 13px;
-}
-
-.kai-sources {
-  display: grid;
-  gap: 8px;
-}
-
-.kai-source {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid var(--b3-border-color);
-  border-radius: 6px;
-  background: var(--b3-theme-background);
-}
-
-.kai-source-index {
-  display: grid;
-  place-items: center;
-  height: 34px;
-  border-radius: 6px;
-  background: var(--b3-theme-surface);
-  color: var(--b3-theme-primary);
-  font-weight: 650;
-}
-
-.kai-source-title {
-  font-weight: 650;
-  line-height: 1.4;
-  word-break: break-word;
-}
-
-.kai-source-text {
-  margin: 6px 0 8px;
-  color: var(--b3-theme-on-surface);
-  font-size: 12px;
-  line-height: 1.6;
-  word-break: break-word;
-}
-
-.kai-log {
-  min-height: 72px;
-  max-height: 150px;
-  overflow: auto;
-  margin: 0;
-  padding: 10px;
-  border: 1px solid var(--b3-border-color);
-  border-radius: 6px;
-  background: var(--b3-theme-surface);
-  color: var(--b3-theme-on-surface-light);
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-}
-
-.kai-log-error {
-  color: var(--b3-theme-error);
-}
-
-@media (max-width: 920px) {
-  .kai-shell {
-    grid-template-columns: 1fr;
-  }
-
-  .kai-sidebar {
-    border-right: 0;
-    border-bottom: 1px solid var(--b3-border-color);
-  }
+.kai-inline-button {
+  align-self: end;
+  width: max-content;
 }
 
 @media (max-width: 680px) {
-  .kai-main {
-    padding: 10px;
-  }
-
-  .kai-grid,
-  .kai-pane-head {
+  .kai-grid {
     grid-template-columns: 1fr;
-    display: grid;
-  }
-
-  .kai-chat-pane {
-    min-height: auto;
   }
 
   .kai-compose-actions {
