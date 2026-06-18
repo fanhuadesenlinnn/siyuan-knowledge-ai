@@ -10,6 +10,7 @@ const {
   buildMessages,
   chunkText,
   cosineSimilarity,
+  countEmbeddedUnits,
   detectProvider,
   extractChatContent,
   extractEmbeddings,
@@ -173,6 +174,7 @@ const ranked = rankChunks(
 assert.strictEqual(ranked.length, 2);
 assert.strictEqual(ranked[0].chunk.id, "a");
 assert.ok(cosineSimilarity([1, 0], [1, 0]) > 0.99);
+assert.strictEqual(countEmbeddedUnits([{ embedding: [1] }, { embedding: [] }, {}, { embedding: [0, 1] }]), 2);
 
 const taggedRanked = rankChunks(
   [

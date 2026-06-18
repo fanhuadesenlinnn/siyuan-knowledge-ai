@@ -12,6 +12,7 @@ const {
   buildModelProxyPayload,
   buildModelRequestHeaders,
   clampNumber,
+  countEmbeddedUnits,
   detectProvider,
   escapeHtml,
   escapeSql,
@@ -595,24 +596,37 @@ class SiyuanKnowledgeAI extends Plugin {
 
       // 检索全库索引（与是否打开笔记无关）
       let ranked = [];
+      let retrievalWarning = "";
       try {
         const chunks = await this.loadIndexedChunks();
+        const embeddedCount = countEmbeddedUnits(chunks);
+        if (!embeddedCount) {
+          throw new Error(`索引分片已读取 ${chunks.length} 个知识单元，但没有可用向量。请重新更新索引，并确认 Embedding 模型可用。`);
+        }
         const queryEmbedding = (await this.embedTexts([question]))[0];
+        if (!Array.isArray(queryEmbedding) || !queryEmbedding.length) {
+          throw new Error("问题向量为空，请测试 Embedding 模型连接。");
+        }
         ranked = rankChunks(chunks, queryEmbedding, this.config.topK, question);
+        if (!ranked.length) {
+          retrievalWarning = `⚠️ 已读取 ${chunks.length} 个知识单元，其中 ${embeddedCount} 个有向量，但本次没有返回引用。请尝试更具体的问题，或重新更新索引。`;
+        }
       } catch (error) {
-        // 索引不可用时降级为纯聊天，不阻断对话
+        // 索引不可用时降级为纯聊天，但必须把原因展示给用户，避免看起来像 AI 读了笔记却一无所知。
         console.warn("Knowledge AI: retrieval skipped", error);
+        retrievalWarning = `⚠️ 笔记检索失败：${error.message || error}\n\n当前回答会暂时按普通聊天生成，不能代表你的思源笔记内容。`;
       }
 
       // 占位助手气泡，流式感
       const placeholder = this.renderMessage(root, "assistant", "思考中...", []);
       const messages = buildMessages(this.config, question, ranked, this.conversation.slice(0, -1));
       const answer = await this.chat(messages);
+      const visibleAnswer = retrievalWarning ? `${retrievalWarning}\n\n${answer}` : answer;
 
-      this.conversation.push({ role: "assistant", content: answer });
-      this.lastAnswer = answer;
+      this.conversation.push({ role: "assistant", content: visibleAnswer });
+      this.lastAnswer = visibleAnswer;
       this.lastSources = ranked;
-      this.updateAssistantMessage(placeholder, answer, ranked);
+      this.updateAssistantMessage(placeholder, visibleAnswer, ranked);
     } finally {
       if (input) input.disabled = false;
       if (sendButton) sendButton.disabled = false;
