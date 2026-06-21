@@ -43,6 +43,7 @@ const {
   parseModelProxyJson,
   parseTimeRange,
   rankChunks,
+  renderBasicMarkdownHtml,
   stableHash,
 } = require("./lib/core");
 
@@ -1130,8 +1131,9 @@ class SiyuanKnowledgeAI extends Plugin {
   getMarkdownRenderer() {
     if (this.markdownRenderer) return this.markdownRenderer;
     try {
-      if (Lute && typeof Lute.New === "function") {
-        const lute = Lute.New();
+      const runtimeLute = Lute || (typeof window !== "undefined" && window.Lute);
+      if (runtimeLute && typeof runtimeLute.New === "function") {
+        const lute = runtimeLute.New();
         if (typeof lute.SetSanitize === "function") lute.SetSanitize(true);
         if (typeof lute.SetGFMStrikethrough === "function") lute.SetGFMStrikethrough(true);
         if (typeof lute.SetInlineMath === "function") lute.SetInlineMath(true);
@@ -1154,7 +1156,7 @@ class SiyuanKnowledgeAI extends Plugin {
     } catch (error) {
       console.warn("Knowledge AI: markdown render failed", error);
     }
-    return `<p>${escapeHtml(markdown).replace(/\n/g, "<br>")}</p>`;
+    return renderBasicMarkdownHtml(markdown);
   }
 
   setBubbleContent(bubble, content) {

@@ -37,6 +37,7 @@ const {
   PROXY_MODE_OPTIONS,
   applyUnitSummary,
   rankChunks,
+  renderBasicMarkdownHtml,
   stableHash,
 } = require("../lib/core");
 
@@ -57,6 +58,36 @@ assert.notStrictEqual(stableHash("abc"), stableHash("abd"));
 assert.deepStrictEqual(normalizeApiKeys({ openai: " sk-openai ", gemini: "", "": "sk-empty-id" }), { openai: "sk-openai" });
 assert.deepStrictEqual(mergeLegacyApiKey({}, " sk-legacy ", "default"), { default: "sk-legacy" });
 assert.deepStrictEqual(mergeLegacyApiKey({ gemini: "sk-gemini", default: "" }, "sk-legacy", "default"), { gemini: "sk-gemini" });
+
+const markdownHtml = renderBasicMarkdownHtml([
+  "# 标题",
+  "",
+  "- **重点**",
+  "- `代码`",
+  "",
+  "| 名称 | 值 |",
+  "| --- | --- |",
+  "| A | [链接](https://example.com) |",
+  "",
+  "[星号链接](https://example.com/a**b**)",
+  "![`alt`](https://example.com/image.png)",
+  "",
+  "```js",
+  "console.log('<x>')",
+  "```",
+  "",
+  "[坏链接](javascript:alert(1))",
+  "<img src=x onerror=alert(1)>",
+].join("\n"));
+assert.ok(markdownHtml.includes("<h1>标题</h1>"));
+assert.ok(markdownHtml.includes("<ul><li><strong>重点</strong></li><li><code>代码</code></li></ul>"));
+assert.ok(markdownHtml.includes("<table>"));
+assert.ok(markdownHtml.includes('href="https://example.com"'));
+assert.ok(markdownHtml.includes('href="https://example.com/a**b**"'));
+assert.ok(markdownHtml.includes('alt="alt"'));
+assert.ok(markdownHtml.includes("&lt;x&gt;"));
+assert.ok(!markdownHtml.includes("javascript:"));
+assert.ok(markdownHtml.includes("&lt;img src=x onerror=alert(1)&gt;"));
 
 const chunks = blockToChunks(
   {

@@ -1,6 +1,6 @@
 {
   "name": "siyuan-knowledge-ai",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Local-first SiYuan AI assistant with S3-synced index shards.",
   "scripts": {
