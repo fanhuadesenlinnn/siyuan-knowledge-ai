@@ -89,6 +89,7 @@
   display: flex;
   flex-direction: column;
   max-width: 100%;
+  padding: 2px 0 10px;
 }
 
 .kai-msg-user {
@@ -97,35 +98,106 @@
 
 .kai-msg-assistant {
   align-items: flex-start;
+  border-bottom: 1px solid var(--b3-border-color);
 }
 
 .kai-bubble {
-  max-width: 90%;
-  padding: 9px 12px;
-  border-radius: 10px;
+  max-width: 100%;
+  padding: 0;
+  border-radius: 0;
   line-height: 1.6;
   word-break: break-word;
 }
 
 .kai-msg-user .kai-bubble {
-  background: var(--b3-theme-primary);
-  color: var(--b3-theme-on-primary);
-  border-bottom-right-radius: 3px;
+  max-width: 92%;
+  color: var(--b3-theme-primary);
+  background: transparent;
 }
 
 .kai-msg-assistant .kai-bubble {
-  background: var(--b3-theme-surface);
+  max-width: 100%;
+  background: transparent;
   color: var(--b3-theme-on-surface);
-  border: 1px solid var(--b3-border-color);
-  border-bottom-left-radius: 3px;
 }
 
-.kai-bubble pre {
+.kai-markdown {
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.kai-markdown > :first-child {
+  margin-top: 0;
+}
+
+.kai-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.kai-markdown p,
+.kai-markdown ul,
+.kai-markdown ol,
+.kai-markdown blockquote,
+.kai-markdown pre,
+.kai-markdown table {
+  margin: 0.45em 0;
+}
+
+.kai-markdown h1,
+.kai-markdown h2,
+.kai-markdown h3,
+.kai-markdown h4 {
+  margin: 0.7em 0 0.35em;
+  font-size: 1em;
+  line-height: 1.45;
+}
+
+.kai-markdown ul,
+.kai-markdown ol {
+  padding-left: 1.4em;
+}
+
+.kai-markdown blockquote {
+  padding-left: 10px;
+  border-left: 3px solid var(--b3-border-color);
+  color: var(--b3-theme-on-surface-light);
+}
+
+.kai-markdown code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--b3-theme-surface);
+  font-family: var(--b3-font-family-code);
+  font-size: 0.92em;
+}
+
+.kai-markdown pre {
   margin: 0;
+  padding: 10px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--b3-theme-surface);
+}
+
+.kai-markdown pre code {
+  padding: 0;
+  background: transparent;
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: inherit;
-  font-size: 13px;
+}
+
+.kai-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+.kai-markdown th,
+.kai-markdown td {
+  padding: 5px 7px;
+  border: 1px solid var(--b3-border-color);
+  text-align: left;
 }
 
 /* ===== 助手消息操作行 ===== */
@@ -152,9 +224,33 @@
   color: var(--b3-theme-on-surface);
 }
 
+.kai-msg-menu-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.kai-msg-menu-item {
+  border: 1px solid var(--b3-border-color);
+  background: var(--b3-theme-surface);
+  color: var(--b3-theme-on-surface);
+  font-size: 11px;
+  line-height: 1.3;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.kai-msg-menu-item:hover {
+  border-color: var(--b3-theme-primary);
+  color: var(--b3-theme-primary);
+}
+
 /* ===== 引用来源（助手气泡内可折叠） ===== */
 .kai-sources {
-  max-width: 92%;
+  width: 100%;
+  max-width: 100%;
   margin-top: 6px;
   border: 1px solid var(--b3-border-color);
   border-radius: 6px;
@@ -367,6 +463,33 @@
   resize: vertical;
 }
 
+.kai-profile-editor {
+  margin: 0;
+  padding: 0;
+}
+
+.kai-profile-toolbar {
+  align-items: center;
+}
+
+.kai-profile-tools {
+  min-width: 0;
+  max-width: 420px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kai-profile-tools .kai-setting-input {
+  min-width: 0;
+  flex: 1;
+}
+
+.kai-profile-tools .b3-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .kai-status {
   min-height: 40px;
   padding: 8px;
@@ -488,5 +611,14 @@
 
   .kai-compose-actions {
     flex-wrap: wrap;
+  }
+
+  .kai-profile-tools {
+    max-width: none;
+    flex-wrap: wrap;
+  }
+
+  .kai-profile-tools .kai-setting-input {
+    flex-basis: 100%;
   }
 }
